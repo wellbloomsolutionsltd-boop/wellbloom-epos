@@ -14,6 +14,9 @@ import {
 import {
   ReturnsModule,
 } from "./returns/returns.module";
+import {
+  CustomersModule,
+} from "./customers/customers.module";
 
 @Module({
   controllers: [AppController],
@@ -26,6 +29,7 @@ import {
     ShiftsModule,
     EndOfDayModule,
     ReturnsModule,
+    CustomersModule,
   ],
 })
 export class AppModule {}

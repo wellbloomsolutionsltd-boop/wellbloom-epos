@@ -38,6 +38,14 @@ type CartItem = {
   quantity: number;
 };
 
+type Customer = {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
 type CompletedSale = {
   id: string;
   saleNumber: string;
@@ -102,6 +110,11 @@ export default function PosPage() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [completedSale, setCompletedSale] =
     useState<CompletedSale | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerResults, setCustomerResults] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] =
+    useState<Customer | null>(null);
+  const [customerSearching, setCustomerSearching] = useState(false);
 
   useEffect(() => {
     const storedSession = getSession();
@@ -216,6 +229,7 @@ export default function PosPage() {
           Authorization: `Bearer ${session.accessToken}`,
         },
         body: JSON.stringify({
+          customerId: selectedCustomer?.id,
           items: cart.map((item) => ({
             productId: item.product.id,
             quantity: item.quantity,
@@ -263,6 +277,7 @@ export default function PosPage() {
       });
 
       setCart([]);
+      setSelectedCustomer(null);
       setAmountTendered("");
       setShowPayment(false);
     } catch (error) {
@@ -271,6 +286,46 @@ export default function PosPage() {
       );
     } finally {
       setPaymentLoading(false);
+    }
+  }
+
+  async function searchCustomers() {
+    const term = customerSearch.trim();
+
+    if (!term) {
+      setCustomerResults([]);
+      return;
+    }
+
+    setCustomerSearching(true);
+
+    try {
+      const response = await fetch(
+        `http://localhost:3001/customers/search/${encodeURIComponent(
+          term,
+        )}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+        },
+      );
+
+      if (response.status === 401) {
+        clearSession();
+        router.replace("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        setMessage("Unable to search customers");
+        return;
+      }
+
+      const data: Customer[] = await response.json();
+      setCustomerResults(data);
+    } finally {
+      setCustomerSearching(false);
     }
   }
 
@@ -506,6 +561,89 @@ export default function PosPage() {
                 </p>
               )}
             </form>
+
+            <div className="rounded-2xl bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold">Customer</h2>
+                  <p className="text-sm text-gray-500">Optional</p>
+                </div>
+
+                {selectedCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCustomer(null)}
+                    className="text-sm font-semibold text-red-600"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              {selectedCustomer ? (
+                <div className="mt-4 rounded-xl bg-green-50 p-4">
+                  <p className="font-bold">
+                    {selectedCustomer.firstName}{" "}
+                    {selectedCustomer.lastName ?? ""}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {selectedCustomer.phone ?? selectedCustomer.email}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 flex gap-2">
+                    <input
+                      value={customerSearch}
+                      onChange={(event) =>
+                        setCustomerSearch(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void searchCustomers();
+                        }
+                      }}
+                      placeholder="Phone, name or email..."
+                      className="min-w-0 flex-1 rounded-xl border px-4 py-3"
+                    />
+                    <button
+                      type="button"
+                      disabled={customerSearching}
+                      onClick={() => void searchCustomers()}
+                      className="rounded-xl bg-black px-4 py-3 font-semibold text-white disabled:opacity-50"
+                    >
+                      {customerSearching ? "Searching..." : "Search"}
+                    </button>
+                  </div>
+
+                  {customerResults.length > 0 && (
+                    <div className="mt-3 divide-y rounded-xl border">
+                      {customerResults.map((customer) => (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCustomer(customer);
+                            setCustomerResults([]);
+                            setCustomerSearch("");
+                          }}
+                          className="block w-full p-3 text-left hover:bg-gray-50"
+                        >
+                          <p className="font-semibold">
+                            {customer.firstName}{" "}
+                            {customer.lastName ?? ""}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {customer.phone ?? customer.email}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
             <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
               <div className="border-b border-gray-200 p-4">

@@ -57,6 +57,24 @@ export class SalesService {
         );
       }
 
+      let customerId: string | null = null;
+
+      if (dto.customerId) {
+        const customer = await tx.customer.findFirst({
+          where: {
+            id: dto.customerId,
+            tenantId: user.tenantId,
+            isActive: true,
+          },
+        });
+
+        if (!customer) {
+          throw new BadRequestException("Customer not found");
+        }
+
+        customerId = customer.id;
+      }
+
       const calculatedItems: {
         productId: string;
         quantity: Prisma.Decimal;
@@ -152,6 +170,7 @@ export class SalesService {
           branchId,
           cashierId: user.sub,
           shiftId: shift.id,
+          customerId,
           subtotal,
           discountAmount: discount,
           totalAmount: total,
@@ -183,6 +202,15 @@ export class SalesService {
               lastName: true,
               email: true,
               role: true,
+            },
+          },
+          customer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              email: true,
             },
           },
           items: { include: { product: true } },
@@ -457,6 +485,15 @@ export class SalesService {
             role: true,
           },
         },
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            email: true,
+          },
+        },
         items: { include: { product: true } },
         payments: true,
       },
@@ -508,6 +545,15 @@ export class SalesService {
             role: true,
           },
         },
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            email: true,
+          },
+        },
         items: { include: { product: true } },
         payments: true,
       },
@@ -538,6 +584,15 @@ export class SalesService {
             firstName: true,
             lastName: true,
             role: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            email: true,
           },
         },
         items: {

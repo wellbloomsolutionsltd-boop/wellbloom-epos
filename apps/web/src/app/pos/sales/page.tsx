@@ -42,6 +42,13 @@ type Sale = {
     lastName: string;
     role: string;
   } | null;
+  customer: {
+    id: string;
+    firstName: string;
+    lastName: string | null;
+    phone: string | null;
+    email: string | null;
+  } | null;
   items: {
     id: string;
     quantity: string;
@@ -301,6 +308,7 @@ export default function SalesHistoryPage() {
                     "Date",
                     "Branch",
                     "Cashier",
+                    "Customer",
                     "Items",
                     "Payment",
                     "Total",
@@ -316,13 +324,13 @@ export default function SalesHistoryPage() {
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={9} className="p-10 text-center text-gray-500">
+                    <td colSpan={10} className="p-10 text-center text-gray-500">
                       Loading sales...
                     </td>
                   </tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="p-10 text-center text-gray-500">
+                    <td colSpan={10} className="p-10 text-center text-gray-500">
                       No sales found.
                     </td>
                   </tr>
@@ -340,6 +348,11 @@ export default function SalesHistoryPage() {
                         {sale.cashier
                           ? `${sale.cashier.firstName} ${sale.cashier.lastName}`
                           : "Legacy Sale"}
+                      </td>
+                      <td className="px-4 py-4">
+                        {sale.customer
+                          ? `${sale.customer.firstName} ${sale.customer.lastName ?? ""}`.trim()
+                          : "Walk-in"}
                       </td>
                       <td className="px-4 py-4">
                         {sale.items.reduce(
@@ -416,6 +429,14 @@ export default function SalesHistoryPage() {
                 <div>
                   <p className="text-xs text-gray-500">Status</p>
                   <p className="font-semibold">{selectedSale.status}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Customer</p>
+                  <p className="font-semibold">
+                    {selectedSale.customer
+                      ? `${selectedSale.customer.firstName} ${selectedSale.customer.lastName ?? ""}`.trim()
+                      : "Walk-in customer"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Total</p>

@@ -132,13 +132,26 @@ model User {
 }
 
 model Customer {
-  id    String  @id @default(cuid())
-  name  String
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  id String @id @default(cuid())
+
+  firstName String
+  lastName  String?
+
   phone String?
   email String?
 
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  dateOfBirth DateTime?
+
+  isActive Boolean @default(true)
+
+  loyaltyPoints Int @default(0)
+
+  creditLimit Decimal @default(0) @db.Decimal(12, 2)
+
+  notes String?
 
   sales         Sale[]
   cashMovements CashDrawerMovement[]
@@ -147,6 +160,10 @@ model Customer {
   updatedAt DateTime @updatedAt
 
   @@unique([tenantId, phone])
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([firstName])
+  @@index([phone])
 }
 
 model Sale {
@@ -197,6 +214,7 @@ model Sale {
   @@index([cashierId])
   @@index([shiftId])
   @@index([voidedById])
+  @@index([customerId])
 }
 
 model Shift {

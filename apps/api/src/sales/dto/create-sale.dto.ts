@@ -49,6 +49,10 @@ export class CreatePaymentDto {
 }
 
 export class CreateSaleDto {
+	@IsOptional()
+	@IsString()
+	customerId?: string;
+
 	@IsArray()
 	@ArrayMinSize(1)
 	@ValidateNested({ each: true })
