@@ -14,10 +14,20 @@ import {
 import {
   CurrentUser,
 } from "../auth/current-user.decorator";
+import {
+  Roles,
+} from "../auth/roles.decorator";
+import {
+  RolesGuard,
+} from "../auth/roles.guard";
 import { CreateSaleDto } from "./dto/create-sale.dto";
+import { VoidSaleDto } from "./dto/void-sale.dto";
 import { SalesService } from "./sales.service";
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(
+  JwtAuthGuard,
+  RolesGuard,
+)
 @Controller("sales")
 export class SalesController {
   constructor(
@@ -36,6 +46,30 @@ export class SalesController {
       createSaleDto,
       user,
     );
+  }
+
+  @Roles(
+    "MANAGER",
+    "TENANT_ADMIN",
+    "SUPER_ADMIN",
+  )
+  @Post(":id/void")
+  voidSale(
+    @Param("id")
+    id: string,
+
+    @Body()
+    dto: VoidSaleDto,
+
+    @CurrentUser()
+    user: AuthenticatedUser,
+  ) {
+    return this.salesService
+      .voidSale(
+        id,
+        dto.reason,
+        user,
+      );
   }
 
   @Get()

@@ -23,6 +23,14 @@ type Sale = {
   change: string;
   status: string;
   createdAt: string;
+  voidReason?: string | null;
+  voidedAt?: string | null;
+  voidedBy?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+  } | null;
   branch: {
     id: string;
     name: string;
@@ -93,8 +101,17 @@ export default function SalesHistoryPage() {
   const router = useRouter();
   const session = getSession();
 
+  const canVoid =
+    session?.user.role === "MANAGER" ||
+    session?.user.role === "TENANT_ADMIN" ||
+    session?.user.role === "SUPER_ADMIN";
+
   const [sales, setSales] = useState<Sale[]>([]);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [voiding, setVoiding] = useState(false);
+  const [voidMessage, setVoidMessage] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -158,6 +175,67 @@ export default function SalesHistoryPage() {
       setMessage(error instanceof Error ? error.message : "Search failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function voidSale() {
+    if (!session || !selectedSale) {
+      return;
+    }
+
+    setVoiding(true);
+    setVoidMessage("");
+
+    try {
+      const response = await fetch(
+        `http://localhost:3001/sales/${selectedSale.id}/void`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          body: JSON.stringify({
+            reason: voidReason,
+          }),
+        },
+      );
+
+      if (response.status === 401) {
+        clearSession();
+        router.replace("/login");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          Array.isArray(data.message)
+            ? data.message.join(", ")
+            : data.message ?? "Unable to void sale",
+        );
+      }
+
+      const updatedSale = normalizeSale(data);
+
+      setSales((currentSales) =>
+        currentSales.map((sale) =>
+          sale.id === updatedSale.id ? updatedSale : sale,
+        ),
+      );
+      setSelectedSale(updatedSale);
+      setShowVoidModal(false);
+      setVoidReason("");
+      setMessage(`Sale ${updatedSale.saleNumber} was voided.`);
+    } catch (error) {
+      setVoidMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to void sale",
+      );
+    } finally {
+      setVoiding(false);
     }
   }
 
@@ -276,7 +354,13 @@ export default function SalesHistoryPage() {
                         KES {money(sale.total)}
                       </td>
                       <td className="px-4 py-4">
-                        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            sale.status === "VOIDED"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-green-100 text-green-700"
+                          }`}
+                        >
                           {sale.status}
                         </span>
                       </td>
@@ -337,6 +421,34 @@ export default function SalesHistoryPage() {
                   <p className="text-xs text-gray-500">Total</p>
                   <p className="font-bold">KES {money(selectedSale.total)}</p>
                 </div>
+                {selectedSale.status === "VOIDED" && (
+                  <>
+                    <div>
+                      <p className="text-xs text-gray-500">Voided by</p>
+                      <p className="font-semibold">
+                        {selectedSale.voidedBy
+                          ? `${selectedSale.voidedBy.firstName} ${selectedSale.voidedBy.lastName}`
+                          : "Unknown manager"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Void date</p>
+                      <p className="font-semibold">
+                        {selectedSale.voidedAt
+                          ? new Date(selectedSale.voidedAt).toLocaleString(
+                              "en-KE",
+                            )
+                          : "Not recorded"}
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-xs text-gray-500">Reason</p>
+                      <p className="font-semibold">
+                        {selectedSale.voidReason ?? "No reason recorded"}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -363,12 +475,76 @@ export default function SalesHistoryPage() {
                   Return Items
                 </button>
               )}
+              {canVoid && selectedSale.status === "COMPLETED" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoidMessage("");
+                    setShowVoidModal(true);
+                  }}
+                  className="rounded-xl bg-red-700 px-4 py-3 font-bold text-white"
+                >
+                  Void Sale
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => window.print()}
                 className="rounded-xl bg-green-600 px-4 py-3 font-bold text-white"
               >
                 Reprint Receipt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVoidModal && selectedSale && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-2xl font-bold text-gray-900">Void Sale</h2>
+
+            <p className="mt-2 text-sm text-gray-500">Receipt</p>
+            <p className="font-bold">
+              {selectedSale.receiptNumber || selectedSale.saleNumber}
+            </p>
+
+            <label className="mt-5 block font-semibold">Reason</label>
+            <textarea
+              required
+              minLength={3}
+              value={voidReason}
+              onChange={(event) => setVoidReason(event.target.value)}
+              className="mt-2 min-h-28 w-full rounded-xl border border-gray-300 px-4 py-3"
+              placeholder="Incorrect duplicate transaction"
+            />
+
+            {voidMessage && (
+              <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-medium text-red-600">
+                {voidMessage}
+              </div>
+            )}
+
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={voiding}
+                onClick={() => {
+                  setShowVoidModal(false);
+                  setVoidReason("");
+                  setVoidMessage("");
+                }}
+                className="rounded-xl border border-gray-300 px-4 py-3 font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={voiding || voidReason.trim().length < 3}
+                onClick={voidSale}
+                className="rounded-xl bg-red-700 px-4 py-3 font-bold text-white disabled:opacity-50"
+              >
+                {voiding ? "Voiding..." : "Confirm Void"}
               </button>
             </div>
           </div>

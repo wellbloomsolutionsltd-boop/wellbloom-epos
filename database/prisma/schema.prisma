@@ -121,6 +121,7 @@ model User {
   endOfDaysClosed              EndOfDay[]
   returnsRequested             Return[]              @relation("ReturnRequestedBy")
   returnsApproved              Return[]              @relation("ReturnApprovedBy")
+  salesVoided                  Sale[]                @relation("SaleVoidedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -162,6 +163,12 @@ model Sale {
   cashierId String?
   cashier   User?   @relation(fields: [cashierId], references: [id])
 
+  voidedById String?
+  voidedBy   User?   @relation("SaleVoidedBy", fields: [voidedById], references: [id])
+
+  voidReason String?
+  voidedAt   DateTime?
+
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
 
@@ -189,6 +196,7 @@ model Sale {
   @@index([branchId, createdAt])
   @@index([cashierId])
   @@index([shiftId])
+  @@index([voidedById])
 }
 
 model Shift {

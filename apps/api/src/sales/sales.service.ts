@@ -239,6 +239,201 @@ export class SalesService {
     });
   }
 
+  async voidSale(
+    saleId: string,
+    reason: string,
+    manager: AuthenticatedUser,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const sale =
+          await tx.sale.findFirst({
+            where: {
+              id: saleId,
+              tenantId:
+                manager.tenantId,
+            },
+
+            include: {
+              items: true,
+              payments: true,
+            },
+          });
+
+        if (!sale) {
+          throw new NotFoundException(
+            "Sale not found",
+          );
+        }
+
+        if (
+          sale.status !==
+          "COMPLETED"
+        ) {
+          throw new BadRequestException(
+            "Only completed sales can be voided",
+          );
+        }
+
+        if (
+          sale.voidedAt ||
+          sale.voidedById
+        ) {
+          throw new BadRequestException(
+            "Sale has already been voided",
+          );
+        }
+
+        for (const item of sale.items) {
+          await tx.inventory.update({
+            where: {
+              branchId_productId: {
+                branchId:
+                  sale.branchId,
+
+                productId:
+                  item.productId,
+              },
+            },
+
+            data: {
+              quantity: {
+                increment:
+                  item.quantity,
+              },
+            },
+          });
+        }
+
+        const cashPaid =
+          sale.payments
+            .filter(
+              (payment) =>
+                payment.method ===
+                "CASH",
+            )
+            .reduce(
+              (sum, payment) =>
+                sum.add(
+                  payment.amount,
+                ),
+              new Prisma.Decimal(
+                0,
+              ),
+            );
+
+        if (
+          cashPaid.greaterThan(
+            0,
+          )
+        ) {
+          const shift =
+            await tx.shift.findFirst({
+              where: {
+                id:
+                  sale.shiftId ??
+                  undefined,
+
+                status:
+                  "OPEN",
+              },
+            });
+
+          if (!shift) {
+            throw new BadRequestException(
+              "Cash sale cannot be voided because its cashier shift is no longer open",
+            );
+          }
+
+          const reversalAmount =
+            Prisma.Decimal.min(
+              cashPaid,
+              sale.totalAmount,
+            );
+
+          await tx.cashDrawerMovement.create({
+            data: {
+              tenantId:
+                sale.tenantId,
+
+              branchId:
+                sale.branchId,
+
+              shiftId:
+                shift.id,
+
+              userId:
+                manager.sub,
+
+              type:
+                "CASH_REFUND",
+
+              amount:
+                reversalAmount,
+
+              reference:
+                sale.saleNumber,
+
+              notes:
+                `VOID reversal for ${sale.saleNumber}: ${reason}`,
+            },
+          });
+        }
+
+        return tx.sale.update({
+          where: {
+            id:
+              sale.id,
+          },
+
+          data: {
+            status:
+              "VOIDED",
+
+            voidedById:
+              manager.sub,
+
+            voidReason:
+              reason,
+
+            voidedAt:
+              new Date(),
+          },
+
+          include: {
+            branch: true,
+
+            cashier: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                role: true,
+              },
+            },
+
+            voidedBy: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                role: true,
+              },
+            },
+
+            items: {
+              include: {
+                product: true,
+              },
+            },
+
+            payments: true,
+          },
+        });
+      },
+    );
+  }
+
   async findAll(user: AuthenticatedUser) {
     return this.prisma.sale.findMany({
       where: {
@@ -247,6 +442,14 @@ export class SalesService {
       include: {
         branch: true,
         cashier: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
+        voidedBy: {
           select: {
             id: true,
             firstName: true,
@@ -297,6 +500,14 @@ export class SalesService {
             role: true,
           },
         },
+        voidedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
         items: { include: { product: true } },
         payments: true,
       },
@@ -314,6 +525,14 @@ export class SalesService {
       include: {
         branch: true,
         cashier: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
+        voidedBy: {
           select: {
             id: true,
             firstName: true,
