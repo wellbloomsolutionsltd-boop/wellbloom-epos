@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "preserve",
+    "target": "es2022",
+    "moduleResolution": "bundler",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true
+  },
+  "include": ["src/**/*.ts"]
+}
