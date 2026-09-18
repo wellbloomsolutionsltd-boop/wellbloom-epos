@@ -11,6 +11,9 @@ import {
 import {
   EndOfDayModule,
 } from "./end-of-day/end-of-day.module";
+import {
+  ReturnsModule,
+} from "./returns/returns.module";
 
 @Module({
   controllers: [AppController],
@@ -22,6 +25,7 @@ import {
     AuthModule,
     ShiftsModule,
     EndOfDayModule,
+    ReturnsModule,
   ],
 })
 export class AppModule {}

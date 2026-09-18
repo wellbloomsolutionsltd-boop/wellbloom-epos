@@ -321,7 +321,20 @@ export class SalesService {
             role: true,
           },
         },
-        items: { include: { product: true } },
+        items: {
+          include: {
+            product: true,
+            returnItems: {
+              include: {
+                return: {
+                  select: {
+                    status: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         payments: true,
       },
     });

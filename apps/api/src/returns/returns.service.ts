@@ -199,4 +199,313 @@ export class ReturnsService {
       },
     });
   }
+
+  async reviewReturn(
+    returnId: string,
+    dto: ReviewReturnDto,
+    manager: AuthenticatedUser,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const returnRecord =
+          await tx.return.findFirst({
+            where: {
+              id:
+                returnId,
+
+              tenantId:
+                manager.tenantId,
+
+              status:
+                "PENDING",
+            },
+
+            include: {
+              items: true,
+              sale: true,
+            },
+          });
+
+        if (!returnRecord) {
+          throw new NotFoundException(
+            "Pending return not found",
+          );
+        }
+
+        if (
+          returnRecord.requestedById ===
+          manager.sub
+        ) {
+          throw new BadRequestException(
+            "You cannot approve your own return request",
+          );
+        }
+
+        if (
+          dto.decision ===
+          "REJECTED"
+        ) {
+          return tx.return.update({
+            where: {
+              id:
+                returnRecord.id,
+            },
+
+            data: {
+              status:
+                "REJECTED",
+
+              approvedById:
+                manager.sub,
+
+              approvedAt:
+                new Date(),
+            },
+          });
+        }
+
+        for (
+          const item
+          of returnRecord.items
+        ) {
+          await tx.inventory.update({
+            where: {
+              branchId_productId: {
+                branchId:
+                  returnRecord.branchId,
+
+                productId:
+                  item.productId,
+              },
+            },
+
+            data: {
+              quantity: {
+                increment:
+                  item.quantity,
+              },
+            },
+          });
+        }
+
+        if (
+          returnRecord.refundMethod ===
+          "CASH"
+        ) {
+          const shift =
+            await tx.shift.findFirst({
+              where: {
+                tenantId:
+                  manager.tenantId,
+
+                branchId:
+                  returnRecord.branchId,
+
+                userId:
+                  returnRecord.requestedById,
+
+                status:
+                  "OPEN",
+              },
+            });
+
+          if (!shift) {
+            throw new BadRequestException(
+              "Cash refund requires an open cashier shift",
+            );
+          }
+
+          await tx.cashDrawerMovement.create({
+            data: {
+              tenantId:
+                returnRecord.tenantId,
+
+              branchId:
+                returnRecord.branchId,
+
+              shiftId:
+                shift.id,
+
+              userId:
+                returnRecord.requestedById,
+
+              type:
+                "CASH_REFUND",
+
+              amount:
+                returnRecord.refundAmount,
+
+              reference:
+                returnRecord.returnNumber,
+
+              notes:
+                `Return ${returnRecord.returnNumber}`,
+            },
+          });
+        }
+
+        const completed =
+          await tx.return.update({
+            where: {
+              id:
+                returnRecord.id,
+            },
+
+            data: {
+              status:
+                "COMPLETED",
+
+              approvedById:
+                manager.sub,
+
+              approvedAt:
+                new Date(),
+
+              completedAt:
+                new Date(),
+            },
+
+            include: {
+              sale: true,
+
+              items: {
+                include: {
+                  product: true,
+                },
+              },
+
+              requestedBy: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+
+              approvedBy: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          });
+
+        const originalSale =
+          await tx.sale.findUnique({
+            where: {
+              id:
+                returnRecord.saleId,
+            },
+
+            include: {
+              items: {
+                include: {
+                  returnItems: {
+                    include: {
+                      return: true,
+                    },
+                  },
+                },
+              },
+            },
+          });
+
+        if (originalSale) {
+          const fullyReturned =
+            originalSale.items.every(
+              (saleItem) => {
+                const returned =
+                  saleItem.returnItems
+                    .filter(
+                      (returnItem) =>
+                        returnItem.return
+                          .status ===
+                        "COMPLETED",
+                    )
+                    .reduce(
+                      (sum, returnItem) =>
+                        sum.add(
+                          returnItem.quantity,
+                        ),
+                      new Prisma.Decimal(
+                        0,
+                      ),
+                    );
+
+                return returned.greaterThanOrEqualTo(
+                  saleItem.quantity,
+                );
+              },
+            );
+
+          if (fullyReturned) {
+            await tx.sale.update({
+              where: {
+                id:
+                  originalSale.id,
+              },
+
+              data: {
+                status:
+                  "REFUNDED",
+              },
+            });
+          }
+        }
+
+        return completed;
+      },
+    );
+  }
+
+  async findAll(
+    user: AuthenticatedUser,
+  ) {
+    return this.prisma.return.findMany({
+      where: {
+        tenantId:
+          user.tenantId,
+
+        ...(user.branchId
+          ? {
+              branchId:
+                user.branchId,
+            }
+          : {}),
+      },
+
+      include: {
+        sale: true,
+
+        items: {
+          include: {
+            product: true,
+          },
+        },
+
+        requestedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+
+      orderBy: {
+        createdAt:
+          "desc",
+      },
+    });
+  }
 }

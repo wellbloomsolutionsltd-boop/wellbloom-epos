@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 
 import {
+  useRouter,
+} from "next/navigation";
+
+import {
   clearSession,
   getSession,
 } from "../../../lib/auth";
@@ -86,6 +90,7 @@ function normalizeSale(sale: ApiSale): Sale {
 }
 
 export default function SalesHistoryPage() {
+  const router = useRouter();
   const session = getSession();
 
   const [sales, setSales] = useState<Sale[]>([]);
@@ -337,7 +342,7 @@ export default function SalesHistoryPage() {
 
             <Receipt sale={selectedSale} />
 
-            <div className="mt-6 grid grid-cols-2 gap-3 print:hidden">
+            <div className="mt-6 grid gap-3 print:hidden sm:grid-cols-3">
               <button
                 type="button"
                 onClick={() => setSelectedSale(null)}
@@ -345,6 +350,19 @@ export default function SalesHistoryPage() {
               >
                 Close
               </button>
+              {selectedSale.status === "COMPLETED" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push(
+                      `/pos/returns/new?saleId=${selectedSale.id}`,
+                    );
+                  }}
+                  className="rounded-xl bg-red-600 px-4 py-3 font-bold text-white"
+                >
+                  Return Items
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => window.print()}
