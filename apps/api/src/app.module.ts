@@ -17,6 +17,9 @@ import {
 import {
   CustomersModule,
 } from "./customers/customers.module";
+import {
+  ReportsModule,
+} from "./reports/reports.module";
 
 @Module({
   controllers: [AppController],
@@ -30,6 +33,7 @@ import {
     EndOfDayModule,
     ReturnsModule,
     CustomersModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}
