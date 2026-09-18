@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Inject,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 
@@ -25,6 +26,10 @@ import {
 import {
   ReportsService,
 } from "./reports.service";
+
+import {
+  ReportRangeDto,
+} from "./dto/report-range.dto";
 
 @UseGuards(
   JwtAuthGuard,
@@ -54,5 +59,64 @@ export class ReportsController {
       .getTodayDashboard(
         user,
       );
+  }
+
+  @Get("sales/period")
+  getSalesPeriod(
+    @Query() query: ReportRangeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reportsService.getSalesByPeriod(
+      user,
+      query.startDate,
+      query.endDate,
+      query.branchId,
+    );
+  }
+
+  @Get("sales/monthly")
+  getMonthlySales(
+    @Query("year") year: string,
+    @Query("branchId") branchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const parsedYear = Number(year) || new Date().getFullYear();
+    return this.reportsService.getMonthlySales(
+      user,
+      parsedYear,
+      branchId,
+    );
+  }
+
+  @Get("sales/by-branch")
+  getSalesByBranch(
+    @Query() query: ReportRangeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reportsService.getSalesByBranch(
+      user,
+      query.startDate,
+      query.endDate,
+    );
+  }
+
+  @Get("sales/by-product")
+  getSalesByProduct(
+    @Query() query: ReportRangeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reportsService.getSalesByProduct(
+      user,
+      query.startDate,
+      query.endDate,
+      query.branchId,
+    );
+  }
+
+  @Get("inventory/valuation")
+  getStockValuation(
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reportsService.getStockValuation(user);
   }
 }

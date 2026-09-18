@@ -105,33 +105,51 @@ export class SalesService {
         const unitPrice = new Prisma.Decimal(product.sellingPrice);
         const lineTotal = unitPrice.mul(quantity);
 
-        const stockUpdate = await tx.inventory.updateMany({
+        const inventory = await tx.inventory.findUnique({
           where: {
-            branchId,
-            productId: product.id,
-            quantity: { gte: quantity },
-          },
-          data: {
-            quantity: { decrement: quantity },
+            branchId_productId: {
+              branchId,
+              productId: product.id,
+            },
           },
         });
 
-        if (stockUpdate.count !== 1) {
-          const inventory = await tx.inventory.findUnique({
-            where: {
-              branchId_productId: {
-                branchId,
-                productId: product.id,
-              },
-            },
-          });
-
-          const available = inventory?.quantity?.toString() ?? "0";
-
+        if (!inventory) {
           throw new BadRequestException(
-            `Insufficient stock for ${product.name}. Available: ${available}`,
+            `No inventory found for ${product.name}`,
           );
         }
+
+        const available =
+          new Prisma.Decimal(
+            inventory.quantity,
+          ).sub(
+            inventory.reservedQty,
+          );
+
+        if (
+          available.lessThan(
+            quantity,
+          )
+        ) {
+          throw new BadRequestException(
+            `Insufficient available stock for ${product.name}. Available: ${available.toString()}`,
+          );
+        }
+
+        await tx.inventory.update({
+          where: {
+            branchId_productId: {
+              branchId,
+              productId: product.id,
+            },
+          },
+          data: {
+            quantity: {
+              decrement: quantity,
+            },
+          },
+        });
 
         calculatedItems.push({
           productId: product.id,
