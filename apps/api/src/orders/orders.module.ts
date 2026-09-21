@@ -13,8 +13,10 @@ import {
 import {
   ReservationExpiryScheduler,
 } from "./reservation-expiry.scheduler";
+import { PricingModule } from "../pricing/pricing.module";
 
 @Module({
+  imports: [PricingModule],
   controllers: [
     OrdersController,
   ],

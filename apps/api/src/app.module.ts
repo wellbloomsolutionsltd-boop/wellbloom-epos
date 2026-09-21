@@ -35,6 +35,9 @@ import {
 import {
   PosCheckoutsModule,
 } from "./pos-checkouts/pos-checkouts.module";
+import {
+  PricingModule,
+} from "./pricing/pricing.module";
 
 @Module({
   controllers: [AppController],
@@ -54,6 +57,7 @@ import {
     InventoryModule,
     PaymentsModule,
     PosCheckoutsModule,
+    PricingModule,
   ],
 })
 export class AppModule {}

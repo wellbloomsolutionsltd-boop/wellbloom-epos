@@ -4,7 +4,7 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "start:dev": "tsx watch src/main.ts",
-    "test": "tsx --tsconfig tsconfig.json --test test/payments.mpesa.spec.ts"
+    "test": "tsx --tsconfig tsconfig.json --test test/*.spec.ts"
   },
   "dependencies": {
     "@nestjs/jwt": "^12.0.2",

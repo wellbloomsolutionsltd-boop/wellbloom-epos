@@ -7,6 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { PricingService } from "../pricing/pricing.service";
 import { CreateSaleDto } from "./dto/create-sale.dto";
 
 @Injectable()
@@ -14,6 +15,8 @@ export class SalesService {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(PricingService)
+    private readonly pricingService: PricingService,
   ) {}
 
   async createSale(
@@ -108,7 +111,15 @@ export class SalesService {
         const quantity = new Prisma.Decimal(
           requestedItem.quantity,
         );
-        const unitPrice = new Prisma.Decimal(product.sellingPrice);
+        const resolvedPrice =
+          await this.pricingService.resolveProductPrice({
+            tenantId: user.tenantId,
+            productId: product.id,
+            branchId: user.branchId,
+            channel: "POS",
+            tx,
+          });
+        const unitPrice = resolvedPrice.price;
         const lineTotal = unitPrice.mul(quantity);
 
         const inventoryBefore = await tx.inventory.findUnique({

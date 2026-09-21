@@ -12,6 +12,7 @@ import {
 import {
   PrismaService,
 } from "../prisma/prisma.service";
+import { PricingService } from "../pricing/pricing.service";
 
 import {
   AuthenticatedUser,
@@ -27,6 +28,9 @@ export class OrdersService {
     @Inject(PrismaService)
     private readonly prisma:
       PrismaService,
+    @Inject(PricingService)
+    private readonly pricingService:
+      PricingService,
   ) {}
 
   private normalizeItems(
@@ -210,10 +214,22 @@ export class OrdersService {
             );
           }
 
+          const resolvedPrice =
+            await this.pricingService
+              .resolveProductPrice({
+                tenantId:
+                  user.tenantId,
+                productId:
+                  product.id,
+                branchId:
+                  branch.id,
+                channel:
+                  "ECOMMERCE",
+                tx,
+              });
+
           const unitPrice =
-            new Prisma.Decimal(
-              product.sellingPrice,
-            );
+            resolvedPrice.price;
 
           const lineTotal =
             unitPrice.mul(
@@ -729,7 +745,11 @@ export class OrdersService {
         }
 
         return {
+          checked:
+            orders.length,
           releasedCount,
+          processedAt:
+            new Date(),
         };
       },
     );

@@ -40,12 +40,9 @@ export class ReservationExpiryScheduler {
         await this.ordersService
           .releaseExpiredReservations();
 
-      if (
-        result.releasedCount >
-        0
-      ) {
+      if (result.checked > 0) {
         this.logger.log(
-          `Released ${result.releasedCount} expired inventory reservation(s)`,
+          `Checked ${result.checked} expired reservation order(s); released ${result.releasedCount} inventory reservation(s)`,
         );
       }
     } catch (error) {

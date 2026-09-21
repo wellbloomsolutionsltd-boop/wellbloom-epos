@@ -9,6 +9,9 @@ import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import {
   OrdersService,
 } from "../orders/orders.service";
+import {
+  PosCheckoutsService,
+} from "../pos-checkouts/pos-checkouts.service";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   getCallbackValue,
@@ -29,6 +32,10 @@ export class PaymentsService {
     @Inject(OrdersService)
     private readonly ordersService:
       OrdersService,
+
+    @Inject(PosCheckoutsService)
+    private readonly posCheckoutsService:
+      PosCheckoutsService,
   ) {}
 
   async initiateOrderMpesa(
@@ -432,6 +439,16 @@ export class PaymentsService {
                     true,
                 },
               },
+              posCheckout: {
+                include: {
+                  reservations: {
+                    where: {
+                      status:
+                        "ACTIVE",
+                    },
+                  },
+                },
+              },
             },
           });
 
@@ -458,6 +475,113 @@ export class PaymentsService {
           return {
             success:
               false,
+          };
+        }
+
+        if (payment.targetType === "POS_CHECKOUT") {
+          if (!payment.posCheckout) {
+            throw new BadRequestException(
+              "M-Pesa payment has no POS checkout",
+            );
+          }
+
+          if (
+            payment.posCheckout.status !==
+              "PAYMENT_PENDING" ||
+            payment.posCheckout.reservations.length === 0
+          ) {
+            await tx.paymentTransaction.update({
+              where: {
+                id:
+                  payment.id,
+              },
+              data: {
+                status:
+                  "REQUIRES_REVIEW",
+                rawVerification:
+                  verification,
+                failureReason:
+                  "Payment received after POS checkout reservation expired or was released",
+              },
+            });
+
+            await tx.paymentCallbackEvent.update({
+              where: {
+                id:
+                  callbackEventId,
+              },
+              data: {
+                processed:
+                  true,
+                processingResult:
+                  "LATE_POS_PAYMENT_REQUIRES_REVIEW",
+                processedAt:
+                  new Date(),
+              },
+            });
+
+            return {
+              success:
+                true,
+              requiresReview:
+                true,
+            };
+          }
+
+          const sale =
+            await this.posCheckoutsService
+              .confirmPaidPosCheckoutWithTx(
+                tx,
+                payment.posCheckout.id,
+                payment.id,
+              );
+
+          const completed =
+            await tx.paymentTransaction.updateMany({
+              where: {
+                id:
+                  payment.id,
+                status:
+                  "VERIFYING",
+              },
+              data: {
+                status:
+                  "SUCCEEDED",
+                completedAt:
+                  new Date(),
+                saleId:
+                  sale.id,
+                rawVerification:
+                  verification,
+              },
+            });
+
+          if (completed.count !== 1) {
+            throw new BadRequestException(
+              "Payment was already finalized",
+            );
+          }
+
+          await tx.paymentCallbackEvent.update({
+            where: {
+              id:
+                callbackEventId,
+            },
+            data: {
+              processed:
+                true,
+              processingResult:
+                "POS_PAYMENT_CONFIRMED",
+              processedAt:
+                new Date(),
+            },
+          });
+
+          return {
+            success:
+              true,
+            saleId:
+              sale.id,
           };
         }
 
