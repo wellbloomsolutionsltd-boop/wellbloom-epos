@@ -1,13 +1,13 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
-import { OrdersService } from "../orders/orders.service";
-import { PosCheckoutsService } from "../pos-checkouts/pos-checkouts.service";
+import {
+  OrdersService,
+} from "../orders/orders.service";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   getCallbackValue,
@@ -17,17 +17,14 @@ import { MpesaService } from "./mpesa/mpesa.service";
 @Injectable()
 export class PaymentsService {
   constructor(
-    @Inject(PrismaService)
-    private readonly prisma: PrismaService,
+    private readonly prisma:
+      PrismaService,
 
-    @Inject(MpesaService)
-    private readonly mpesa: MpesaService,
+    private readonly mpesa:
+      MpesaService,
 
-    @Inject(OrdersService)
-    private readonly ordersService: OrdersService,
-
-    @Inject(PosCheckoutsService)
-    private readonly posCheckoutsService: PosCheckoutsService,
+    private readonly ordersService:
+      OrdersService,
   ) {}
 
   async initiateOrderMpesa(
@@ -286,177 +283,192 @@ export class PaymentsService {
     callbackEventId: string,
     verification: any,
   ) {
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const payment =
-            await tx.paymentTransaction.findUnique({
-              where: {
-                id: paymentId,
-              },
-              include: {
-                order: true,
-                posCheckout: true,
-              },
-            });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const payment =
+          await tx.paymentTransaction.findUnique({
+            where: {
+              id:
+                paymentId,
+            },
 
-          if (!payment) {
-            throw new BadRequestException(
-              "Payment transaction not found",
+            include: {
+              order: {
+                include: {
+                  reservations:
+                    true,
+                },
+              },
+            },
+          });
+
+        if (!payment) {
+          throw new NotFoundException(
+            "Payment not found",
+          );
+        }
+
+        if (
+          payment.status ===
+          "SUCCEEDED"
+        ) {
+          return {
+            success:
+              true,
+          };
+        }
+
+        if (
+          payment.status !==
+          "VERIFYING"
+        ) {
+          return {
+            success:
+              false,
+          };
+        }
+
+        if (!payment.order) {
+          throw new BadRequestException(
+            "M-Pesa payment has no order",
+          );
+        }
+
+        /*
+         * Check reservation state.
+         */
+        const activeReservations =
+          payment.order
+            .reservations
+            .filter(
+              (reservation) =>
+                reservation.status ===
+                "ACTIVE",
             );
-          }
 
-          if (payment.status === "SUCCEEDED") {
-            await tx.paymentCallbackEvent.update({
-              where: {
-                id: callbackEventId,
-              },
-              data: {
-                processed: true,
-                processingResult:
-                  "DUPLICATE_SUCCESS",
-                processedAt: new Date(),
-              },
-            });
+        /*
+         * Late payment:
+         *
+         * money arrived after reservation
+         * was released or expired.
+         */
+        if (
+          activeReservations.length ===
+          0
+        ) {
+          await tx.paymentTransaction.update({
+            where: {
+              id:
+                payment.id,
+            },
 
-            return {
-              ResultCode: 0,
-              ResultDesc: "Accepted",
-            };
-          }
+            data: {
+              status:
+                "REQUIRES_REVIEW",
 
-          if (payment.status !== "VERIFYING") {
-            await tx.paymentCallbackEvent.update({
-              where: {
-                id: callbackEventId,
-              },
-              data: {
-                processed: true,
-                processingResult:
-                  "PAYMENT_NOT_VERIFYING",
-                processedAt: new Date(),
-              },
-            });
+              rawVerification:
+                verification,
 
-            return {
-              ResultCode: 0,
-              ResultDesc: "Accepted",
-            };
-          }
-
-          let saleId: string | undefined;
-
-          if (payment.targetType === "POS_CHECKOUT") {
-            if (!payment.posCheckout) {
-              throw new BadRequestException(
-                "POS payment has no associated checkout",
-              );
-            }
-
-            const sale =
-              await this.posCheckoutsService
-                .confirmPaidPosCheckoutWithTx(
-                  tx,
-                  payment.posCheckout.id,
-                  payment.id,
-                );
-
-            saleId = sale.id;
-          } else if (payment.targetType === "ORDER") {
-            if (!payment.order) {
-              throw new BadRequestException(
-                "Payment has no associated order",
-              );
-            }
-
-            await this.ordersService
-              .confirmPaidOrderWithTx(
-                tx,
-                payment.order.id,
-              );
-          } else {
-            throw new BadRequestException(
-              "Unsupported M-Pesa payment target",
-            );
-          }
-
-          const completed =
-            await tx.paymentTransaction.updateMany({
-              where: {
-                id: payment.id,
-                status: "VERIFYING",
-              },
-              data: {
-                status: "SUCCEEDED",
-                completedAt: new Date(),
-                rawVerification: verification,
-                saleId,
-              },
-            });
-
-          if (completed.count !== 1) {
-            throw new BadRequestException(
-              "Payment has already been processed",
-            );
-          }
+              failureReason:
+                "Payment succeeded after inventory reservation expired or was released",
+            },
+          });
 
           await tx.paymentCallbackEvent.update({
             where: {
-              id: callbackEventId,
+              id:
+                callbackEventId,
             },
+
             data: {
-              processed: true,
+              processed:
+                true,
+
               processingResult:
-                "PAYMENT_VERIFIED",
-              processedAt: new Date(),
+                "LATE_PAYMENT_REQUIRES_REVIEW",
+
+              processedAt:
+                new Date(),
             },
           });
 
           return {
-            ResultCode: 0,
-            ResultDesc: "Accepted",
-          };
-        },
-      );
-    } catch (error) {
-      const failureReason =
-        error instanceof Error
-          ? error.message
-          : "Verified payment could not be finalized";
+            success:
+              true,
 
-      await this.prisma.$transaction(
-        async (tx) => {
+            requiresReview:
+              true,
+          };
+        }
+
+        /*
+         * Complete order using the one
+         * hardened inventory engine.
+         */
+        await this.ordersService
+          .confirmPaidOrderWithTx(
+            tx,
+            payment.order.id,
+          );
+
+        /*
+         * Claim payment exactly once.
+         */
+        const completed =
           await tx.paymentTransaction.updateMany({
             where: {
-              id: paymentId,
-              status: "VERIFYING",
+              id:
+                payment.id,
+
+              status:
+                "VERIFYING",
             },
+
             data: {
-              status: "REQUIRES_REVIEW",
-              rawVerification: verification,
-              failureReason,
+              status:
+                "SUCCEEDED",
+
+              completedAt:
+                new Date(),
+
+              rawVerification:
+                verification,
             },
           });
 
-          await tx.paymentCallbackEvent.update({
-            where: {
-              id: callbackEventId,
-            },
-            data: {
-              processed: true,
-              processingResult:
-                "FINALIZATION_FAILED",
-              processedAt: new Date(),
-            },
-          });
-        },
-      );
+        if (
+          completed.count !==
+          1
+        ) {
+          throw new BadRequestException(
+            "Payment was already finalized",
+          );
+        }
 
-      return {
-        ResultCode: 0,
-        ResultDesc: "Accepted",
-      };
-    }
+        await tx.paymentCallbackEvent.update({
+          where: {
+            id:
+              callbackEventId,
+          },
+
+          data: {
+            processed:
+              true,
+
+            processingResult:
+              "PAYMENT_CONFIRMED",
+
+            processedAt:
+              new Date(),
+          },
+        });
+
+        return {
+          success:
+            true,
+        };
+      },
+    );
   }
 
   async handleMpesaCallback(
