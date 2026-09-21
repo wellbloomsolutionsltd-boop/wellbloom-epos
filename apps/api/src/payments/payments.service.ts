@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -17,12 +18,15 @@ import { MpesaService } from "./mpesa/mpesa.service";
 @Injectable()
 export class PaymentsService {
   constructor(
+    @Inject(PrismaService)
     private readonly prisma:
       PrismaService,
 
+    @Inject(MpesaService)
     private readonly mpesa:
       MpesaService,
 
+    @Inject(OrdersService)
     private readonly ordersService:
       OrdersService,
   ) {}
