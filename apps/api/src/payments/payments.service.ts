@@ -9,6 +9,9 @@ import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { OrdersService } from "../orders/orders.service";
 import { PosCheckoutsService } from "../pos-checkouts/pos-checkouts.service";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  getCallbackValue,
+} from "./mpesa/mpesa-callback";
 import { MpesaService } from "./mpesa/mpesa.service";
 
 @Injectable()
@@ -278,255 +281,702 @@ export class PaymentsService {
     });
   }
 
-  async handleMpesaCallback(body: any) {
-    const callback = body?.Body?.stkCallback;
-
-    if (!callback) {
-      throw new BadRequestException(
-        "Invalid M-Pesa callback",
-      );
-    }
-
-    const checkoutId = callback.CheckoutRequestID;
-
-    if (!checkoutId) {
-      throw new BadRequestException(
-        "Missing CheckoutRequestID",
-      );
-    }
-
-    return this.prisma.$transaction(
-      async (tx) => {
-        const payment =
-          await tx.paymentTransaction.findFirst({
-            where: {
-              provider: "MPESA",
-              providerCheckoutId:
-                checkoutId,
-            },
-            include: {
-              order: {
-                include: {
-                  reservations: {
-                    where: {
-                      status:
-                        "ACTIVE",
-                    },
-                  },
-                },
-              },
-              posCheckout: {
-                include: {
-                  reservations: {
-                    where: {
-                      status:
-                        "ACTIVE",
-                    },
-                  },
-                },
-              },
-            },
-          });
-
-        if (!payment) {
-          throw new NotFoundException(
-            "Payment transaction not found",
-          );
-        }
-
-        if (payment.status === "SUCCEEDED") {
-          return {
-            success: true,
-          };
-        }
-
-        const resultCode = Number(
-          callback.ResultCode,
-        );
-
-        const metadataItems =
-          callback.CallbackMetadata?.Item ?? [];
-        const metadata = Object.fromEntries(
-          metadataItems.map(
-            (item: {
-              Name: string;
-              Value?: unknown;
-            }) => [
-              item.Name,
-              item.Value,
-            ],
-          ),
-        );
-        const callbackAmount =
-          metadata.Amount !== undefined
-            ? new Prisma.Decimal(
-                String(metadata.Amount),
-              )
-            : null;
-        const mpesaReceipt =
-          metadata.MpesaReceiptNumber
-            ? String(metadata.MpesaReceiptNumber)
-            : null;
-        const callbackPhone =
-          metadata.PhoneNumber
-            ? String(metadata.PhoneNumber)
-            : null;
-
-        if (resultCode !== 0) {
-          const now = new Date();
-
-          await tx.paymentTransaction.update({
-            where: {
-              id: payment.id,
-            },
-            data: {
-              status: "FAILED",
-              failedAt: now,
-              callbackReceivedAt: now,
-              failureCode: String(resultCode),
-              failureReason:
-                callback.ResultDesc,
-              rawCallback: body,
-            },
-          });
-
-          const isCancellation =
-            resultCode === 1032;
-          const isExpiry =
-            resultCode === 1037;
-
-          if (
-            payment.targetType ===
-              "POS_CHECKOUT" &&
-            payment.posCheckout
-          ) {
-            await tx.inventoryReservation.updateMany({
+  private async finalizeVerifiedMpesaPayment(
+    paymentId: string,
+    callbackEventId: string,
+    verification: any,
+  ) {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const payment =
+            await tx.paymentTransaction.findUnique({
               where: {
-                posCheckoutId:
-                  payment.posCheckout.id,
-                status: "ACTIVE",
+                id: paymentId,
               },
-              data: {
-                status: isExpiry
-                  ? "EXPIRED"
-                  : "RELEASED",
-                releasedAt: now,
-                expiredAt: isExpiry
-                  ? now
-                  : undefined,
+              include: {
+                order: true,
+                posCheckout: true,
               },
             });
 
-            await tx.posCheckout.update({
-              where: {
-                id:
-                  payment.posCheckout.id,
-              },
-              data: {
-                status: isExpiry
-                  ? "EXPIRED"
-                  : isCancellation
-                    ? "CANCELLED"
-                    : "FAILED",
-                cancelledAt:
-                  isCancellation
-                    ? now
-                    : undefined,
-                failedAt:
-                  isCancellation || isExpiry
-                    ? undefined
-                    : now,
-              },
-            });
-          }
-
-          return {
-            success: true,
-          };
-        }
-
-        if (!callbackAmount) {
-          throw new BadRequestException(
-            "Successful M-Pesa callback has no amount",
-          );
-        }
-
-        if (!callbackAmount.equals(payment.amount)) {
-          throw new BadRequestException(
-            "M-Pesa callback amount mismatch",
-          );
-        }
-
-        await tx.paymentTransaction.update({
-          where: {
-            id: payment.id,
-          },
-          data: {
-            providerAmount: callbackAmount,
-            providerPhone: callbackPhone,
-            externalReference: mpesaReceipt,
-            callbackReceivedAt: new Date(),
-            rawCallback: body,
-          },
-        });
-
-        if (payment.targetType === "POS_CHECKOUT") {
-          if (!payment.posCheckout) {
+          if (!payment) {
             throw new BadRequestException(
-              "POS payment has no associated checkout",
+              "Payment transaction not found",
             );
           }
 
-          const sale =
-            await this.posCheckoutsService
-              .confirmPaidPosCheckoutWithTx(
-                tx,
-                payment.posCheckout.id,
-                payment.id,
-              );
+          if (payment.status === "SUCCEEDED") {
+            await tx.paymentCallbackEvent.update({
+              where: {
+                id: callbackEventId,
+              },
+              data: {
+                processed: true,
+                processingResult:
+                  "DUPLICATE_SUCCESS",
+                processedAt: new Date(),
+              },
+            });
 
-          await tx.paymentTransaction.update({
+            return {
+              ResultCode: 0,
+              ResultDesc: "Accepted",
+            };
+          }
+
+          if (payment.status !== "VERIFYING") {
+            await tx.paymentCallbackEvent.update({
+              where: {
+                id: callbackEventId,
+              },
+              data: {
+                processed: true,
+                processingResult:
+                  "PAYMENT_NOT_VERIFYING",
+                processedAt: new Date(),
+              },
+            });
+
+            return {
+              ResultCode: 0,
+              ResultDesc: "Accepted",
+            };
+          }
+
+          let saleId: string | undefined;
+
+          if (payment.targetType === "POS_CHECKOUT") {
+            if (!payment.posCheckout) {
+              throw new BadRequestException(
+                "POS payment has no associated checkout",
+              );
+            }
+
+            const sale =
+              await this.posCheckoutsService
+                .confirmPaidPosCheckoutWithTx(
+                  tx,
+                  payment.posCheckout.id,
+                  payment.id,
+                );
+
+            saleId = sale.id;
+          } else if (payment.targetType === "ORDER") {
+            if (!payment.order) {
+              throw new BadRequestException(
+                "Payment has no associated order",
+              );
+            }
+
+            await this.ordersService
+              .confirmPaidOrderWithTx(
+                tx,
+                payment.order.id,
+              );
+          } else {
+            throw new BadRequestException(
+              "Unsupported M-Pesa payment target",
+            );
+          }
+
+          const completed =
+            await tx.paymentTransaction.updateMany({
+              where: {
+                id: payment.id,
+                status: "VERIFYING",
+              },
+              data: {
+                status: "SUCCEEDED",
+                completedAt: new Date(),
+                rawVerification: verification,
+                saleId,
+              },
+            });
+
+          if (completed.count !== 1) {
+            throw new BadRequestException(
+              "Payment has already been processed",
+            );
+          }
+
+          await tx.paymentCallbackEvent.update({
             where: {
-              id: payment.id,
+              id: callbackEventId,
             },
             data: {
-              status: "SUCCEEDED",
-              completedAt: new Date(),
-              saleId: sale.id,
+              processed: true,
+              processingResult:
+                "PAYMENT_VERIFIED",
+              processedAt: new Date(),
             },
           });
 
           return {
-            success: true,
-            saleId: sale.id,
+            ResultCode: 0,
+            ResultDesc: "Accepted",
           };
-        }
+        },
+      );
+    } catch (error) {
+      const failureReason =
+        error instanceof Error
+          ? error.message
+          : "Verified payment could not be finalized";
 
-        if (!payment.order) {
-          throw new BadRequestException(
-            "Payment has no associated order",
-          );
-        }
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.paymentTransaction.updateMany({
+            where: {
+              id: paymentId,
+              status: "VERIFYING",
+            },
+            data: {
+              status: "REQUIRES_REVIEW",
+              rawVerification: verification,
+              failureReason,
+            },
+          });
 
-        await this.ordersService.confirmPaidOrderWithTx(
-          tx,
-          payment.order.id,
-        );
+          await tx.paymentCallbackEvent.update({
+            where: {
+              id: callbackEventId,
+            },
+            data: {
+              processed: true,
+              processingResult:
+                "FINALIZATION_FAILED",
+              processedAt: new Date(),
+            },
+          });
+        },
+      );
 
-        await tx.paymentTransaction.update({
-          where: {
-            id: payment.id,
-          },
+      return {
+        ResultCode: 0,
+        ResultDesc: "Accepted",
+      };
+    }
+  }
+
+  async handleMpesaCallback(
+    body: any,
+  ) {
+    const callback =
+      body?.Body?.stkCallback;
+
+    /*
+     * Always store callback evidence first.
+     */
+    const checkoutId =
+      callback?.CheckoutRequestID
+        ? String(
+            callback.CheckoutRequestID,
+          )
+        : null;
+
+    const callbackEvent =
+      await this.prisma
+        .paymentCallbackEvent
+        .create({
           data: {
-            status: "SUCCEEDED",
-            completedAt: new Date(),
+            provider:
+              "MPESA",
+
+            providerCheckoutId:
+              checkoutId,
+
+            payload:
+              body,
           },
         });
 
-        return {
-          success: true,
-        };
-      },
+    if (
+      !callback ||
+      !checkoutId
+    ) {
+      await this.prisma
+        .paymentCallbackEvent
+        .update({
+          where: {
+            id:
+              callbackEvent.id,
+          },
+
+          data: {
+            processed:
+              true,
+
+            processingResult:
+              "INVALID_CALLBACK",
+
+            processedAt:
+              new Date(),
+          },
+        });
+
+      /*
+       * Provider callbacks should normally
+       * receive a successful HTTP response
+       * even when we cannot process the
+       * business event, otherwise repeated
+       * retries may become noisy.
+       */
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    const payment =
+      await this.prisma
+        .paymentTransaction
+        .findUnique({
+          where: {
+            providerCheckoutId:
+              checkoutId,
+          },
+
+          include: {
+            order: {
+              include: {
+                reservations:
+                  true,
+              },
+            },
+          },
+        });
+
+    if (!payment) {
+      await this.prisma
+        .paymentCallbackEvent
+        .update({
+          where: {
+            id:
+              callbackEvent.id,
+          },
+
+          data: {
+            processed:
+              true,
+
+            processingResult:
+              "UNKNOWN_CHECKOUT_ID",
+
+            processedAt:
+              new Date(),
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * Idempotent duplicate success.
+     */
+    if (
+      payment.status ===
+      "SUCCEEDED"
+    ) {
+      await this.prisma
+        .paymentCallbackEvent
+        .update({
+          where: {
+            id:
+              callbackEvent.id,
+          },
+
+          data: {
+            processed:
+              true,
+
+            processingResult:
+              "DUPLICATE_SUCCESS",
+
+            processedAt:
+              new Date(),
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    const resultCode =
+      Number(
+        callback.ResultCode,
+      );
+
+    /*
+     * Failed / cancelled STK attempt.
+     */
+    if (
+      resultCode !== 0
+    ) {
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.paymentTransaction.updateMany({
+            where: {
+              id:
+                payment.id,
+
+              status: {
+                in: [
+                  "INITIATED",
+                  "PENDING",
+                  "VERIFYING",
+                ],
+              },
+            },
+
+            data: {
+              status:
+                "FAILED",
+
+              failedAt:
+                new Date(),
+
+              callbackReceivedAt:
+                new Date(),
+
+              failureCode:
+                String(
+                  resultCode,
+                ),
+
+              failureReason:
+                String(
+                  callback.ResultDesc ??
+                    "M-Pesa payment failed",
+                ),
+
+              rawCallback:
+                body,
+            },
+          });
+
+          await tx.paymentCallbackEvent.update({
+            where: {
+              id:
+                callbackEvent.id,
+            },
+
+            data: {
+              processed:
+                true,
+
+              processingResult:
+                "PAYMENT_FAILED",
+
+              processedAt:
+                new Date(),
+            },
+          });
+        },
+      );
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * Successful callback must contain
+     * metadata.
+     */
+    const items =
+      callback
+        ?.CallbackMetadata
+        ?.Item as
+        | {
+            Name?: string;
+            Value?: string | number;
+          }[]
+        | undefined;
+
+    const amountRaw =
+      getCallbackValue(
+        items,
+        "Amount",
+      );
+
+    const receiptRaw =
+      getCallbackValue(
+        items,
+        "MpesaReceiptNumber",
+      );
+
+    const phoneRaw =
+      getCallbackValue(
+        items,
+        "PhoneNumber",
+      );
+
+    const dateRaw =
+      getCallbackValue(
+        items,
+        "TransactionDate",
+      );
+
+    const providerAmount =
+      new Prisma.Decimal(
+        String(
+          amountRaw ?? 0,
+        ),
+      );
+
+    const receipt =
+      receiptRaw
+        ? String(receiptRaw)
+        : null;
+
+    const providerPhone =
+      phoneRaw
+        ? String(phoneRaw)
+        : null;
+
+    if (
+      !receipt ||
+      providerAmount.lte(0)
+    ) {
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "REQUIRES_REVIEW",
+
+            callbackReceivedAt:
+              new Date(),
+
+            rawCallback:
+              body,
+
+            failureReason:
+              "Successful callback missing required payment metadata",
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * Critical amount validation.
+     */
+    if (
+      !providerAmount.equals(
+        payment.amount,
+      )
+    ) {
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "REQUIRES_REVIEW",
+
+            providerAmount,
+
+            externalReference:
+              receipt,
+
+            providerPhone,
+
+            callbackReceivedAt:
+              new Date(),
+
+            rawCallback:
+              body,
+
+            failureReason:
+              "Amount mismatch. Expected " +
+              payment.amount.toString() +
+              ", received " +
+              providerAmount.toString(),
+          },
+        });
+
+      await this.prisma
+        .paymentCallbackEvent
+        .update({
+          where: {
+            id:
+              callbackEvent.id,
+          },
+
+          data: {
+            processed:
+              true,
+
+            processingResult:
+              "AMOUNT_MISMATCH",
+
+            processedAt:
+              new Date(),
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * Mark VERIFYING before provider query.
+     */
+    const claimed =
+      await this.prisma
+        .paymentTransaction
+        .updateMany({
+          where: {
+            id:
+              payment.id,
+
+            status: {
+              in: [
+                "INITIATED",
+                "PENDING",
+              ],
+            },
+          },
+
+          data: {
+            status:
+              "VERIFYING",
+
+            callbackReceivedAt:
+              new Date(),
+
+            verificationStartedAt:
+              new Date(),
+
+            providerAmount,
+
+            externalReference:
+              receipt,
+
+            providerPhone,
+
+            rawCallback:
+              body,
+          },
+        });
+
+    if (
+      claimed.count !== 1
+    ) {
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * Query provider from our server.
+     */
+    let verification: any;
+
+    try {
+      verification =
+        await this.mpesa.queryStkPush(
+          checkoutId,
+        );
+    } catch {
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "REQUIRES_REVIEW",
+
+            failureReason:
+              "M-Pesa callback received but provider verification could not be completed",
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    /*
+     * In Daraja STK-query responses,
+     * ResultCode 0 indicates successful
+     * completion.
+     *
+     * Do not fulfil when provider query
+     * reports another state.
+     */
+    if (
+      Number(
+        verification?.ResultCode,
+      ) !== 0
+    ) {
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "REQUIRES_REVIEW",
+
+            rawVerification:
+              verification,
+
+            failureReason:
+              "Callback and M-Pesa transaction verification do not agree",
+          },
+        });
+
+      return {
+        ResultCode: 0,
+        ResultDesc:
+          "Accepted",
+      };
+    }
+
+    return this.finalizeVerifiedMpesaPayment(
+      payment.id,
+      callbackEvent.id,
+      verification,
     );
   }
 }
