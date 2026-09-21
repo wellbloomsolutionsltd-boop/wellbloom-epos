@@ -463,6 +463,55 @@ export class PaymentsService {
           );
         }
 
+        if (
+          payment.order.status !==
+          "AWAITING_PAYMENT"
+        ) {
+          await tx.paymentTransaction.update({
+            where: {
+              id:
+                payment.id,
+            },
+
+            data: {
+              status:
+                "REQUIRES_REVIEW",
+
+              rawVerification:
+                verification,
+
+              failureReason:
+                "Payment received after order was no longer awaiting payment",
+            },
+          });
+
+          await tx.paymentCallbackEvent.update({
+            where: {
+              id:
+                callbackEventId,
+            },
+
+            data: {
+              processed:
+                true,
+
+              processingResult:
+                "ORDER_STATE_REQUIRES_REVIEW",
+
+              processedAt:
+                new Date(),
+            },
+          });
+
+          return {
+            success:
+              true,
+
+            requiresReview:
+              true,
+          };
+        }
+
         /*
          * Check reservation state.
          */
