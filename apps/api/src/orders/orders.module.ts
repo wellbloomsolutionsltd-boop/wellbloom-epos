@@ -10,12 +10,17 @@ import {
   OrdersService,
 } from "./orders.service";
 
+import {
+  ReservationExpiryScheduler,
+} from "./reservation-expiry.scheduler";
+
 @Module({
   controllers: [
     OrdersController,
   ],
   providers: [
     OrdersService,
+    ReservationExpiryScheduler,
   ],
   exports: [
     OrdersService,
