@@ -625,6 +625,7 @@ model PaymentTransaction {
   @@index([provider])
   @@index([status])
   @@index([externalReference])
+  @@unique([provider, externalReference])
 }
 
 model PaymentCallbackEvent {

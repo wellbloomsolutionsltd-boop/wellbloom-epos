@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Get,
   Inject,
+  Param,
   Post,
   UseGuards,
 } from "@nestjs/common";
@@ -10,6 +12,12 @@ import {
   AuthenticatedUser,
   JwtAuthGuard,
 } from "../auth/jwt-auth.guard";
+import {
+  Roles,
+} from "../auth/roles.decorator";
+import {
+  RolesGuard,
+} from "../auth/roles.guard";
 import { InitiateMpesaDto } from "./dto/initiate-mpesa.dto";
 import { PaymentsService } from "./payments.service";
 
@@ -53,5 +61,40 @@ export class PaymentsController {
   @Post("mpesa/callback")
   mpesaCallback(@Body() body: unknown) {
     return this.paymentsService.handleMpesaCallback(body);
+  }
+
+  @Get("review")
+  @UseGuards(
+    JwtAuthGuard,
+    RolesGuard,
+  )
+  @Roles(
+    "MANAGER",
+    "TENANT_ADMIN",
+    "SUPER_ADMIN",
+    "ACCOUNTANT",
+    "ECOMMERCE_MANAGER",
+  )
+  paymentReviewQueue(
+    @CurrentUser()
+    user: AuthenticatedUser,
+  ) {
+    return this.paymentsService.getPaymentReviewQueue(
+      user,
+    );
+  }
+
+  @Get(":transactionNumber/status")
+  @UseGuards(JwtAuthGuard)
+  paymentStatus(
+    @Param("transactionNumber")
+    transactionNumber: string,
+    @CurrentUser()
+    user: AuthenticatedUser,
+  ) {
+    return this.paymentsService.getMpesaPaymentStatus(
+      transactionNumber,
+      user,
+    );
   }
 }

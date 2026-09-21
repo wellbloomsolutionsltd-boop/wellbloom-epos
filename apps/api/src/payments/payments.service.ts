@@ -49,23 +49,35 @@ export class PaymentsService {
       );
     }
 
-    const existingPendingPayment =
-      await this.prisma.paymentTransaction.findFirst({
-        where: {
-          orderId: order.id,
-          provider: "MPESA",
-          status: {
-            in: ["INITIATED", "PENDING"],
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
+    const existing =
+      await this.prisma
+        .paymentTransaction
+        .findFirst({
+          where: {
+            orderId:
+              order.id,
 
-    if (existingPendingPayment) {
+            provider:
+              "MPESA",
+
+            status: {
+              in: [
+                "INITIATED",
+                "PENDING",
+                "VERIFYING",
+              ],
+            },
+          },
+
+          orderBy: {
+            createdAt:
+              "desc",
+          },
+        });
+
+    if (existing) {
       throw new BadRequestException(
-        "An M-Pesa payment is already pending for this order",
+        "An M-Pesa payment request is already pending for this order",
       );
     }
 
@@ -114,7 +126,7 @@ export class PaymentsService {
       throw error;
     }
 
-    return this.prisma.paymentTransaction.update({
+    await this.prisma.paymentTransaction.update({
       where: {
         id: payment.id,
       },
@@ -127,6 +139,15 @@ export class PaymentsService {
         rawResponse: response,
       },
     });
+
+    return {
+      transactionNumber:
+        payment.transactionNumber,
+      status:
+        "PENDING",
+      message:
+        "Check your phone to complete payment.",
+    };
   }
 
   async initiatePosMpesa(
@@ -238,20 +259,19 @@ export class PaymentsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updatedPayment =
-        await tx.paymentTransaction.update({
-          where: {
-            id: payment.id,
-          },
-          data: {
-            status: "PENDING",
-            providerRequestId:
-              response.MerchantRequestID,
-            providerCheckoutId:
-              response.CheckoutRequestID,
-            rawResponse: response,
-          },
-        });
+      await tx.paymentTransaction.update({
+        where: {
+          id: payment.id,
+        },
+        data: {
+          status: "PENDING",
+          providerRequestId:
+            response.MerchantRequestID,
+          providerCheckoutId:
+            response.CheckoutRequestID,
+          rawResponse: response,
+        },
+      });
 
       await tx.posCheckout.update({
         where: {
@@ -264,18 +284,127 @@ export class PaymentsService {
       });
 
       return {
-        success: true,
-        payment: updatedPayment,
-        checkout: {
-          id: checkout.id,
-          checkoutNumber:
-            checkout.checkoutNumber,
-          status: "PAYMENT_PENDING",
-          totalAmount:
-            checkout.totalAmount,
-        },
+        transactionNumber:
+          payment.transactionNumber,
+        status:
+          "PENDING",
+        message:
+          "Check your phone to complete payment.",
       };
     });
+  }
+
+  async getMpesaPaymentStatus(
+    transactionNumber: string,
+    user: AuthenticatedUser,
+  ) {
+    const payment =
+      await this.prisma.paymentTransaction.findFirst({
+        where: {
+          transactionNumber,
+          tenantId:
+            user.tenantId,
+          provider:
+            "MPESA",
+        },
+        select: {
+          transactionNumber: true,
+          provider: true,
+          status: true,
+          amount: true,
+          currency: true,
+          externalReference: true,
+        },
+      });
+
+    if (!payment) {
+      throw new NotFoundException(
+        "M-Pesa payment not found",
+      );
+    }
+
+    return {
+      transactionNumber:
+        payment.transactionNumber,
+      provider:
+        payment.provider,
+      status:
+        payment.status,
+      amount:
+        payment.amount.toFixed(2),
+      currency:
+        payment.currency,
+      externalReference:
+        payment.externalReference,
+    };
+  }
+
+  async getPaymentReviewQueue(
+    user: AuthenticatedUser,
+  ) {
+    const payments =
+      await this.prisma.paymentTransaction.findMany({
+        where: {
+          tenantId:
+            user.tenantId,
+          status:
+            "REQUIRES_REVIEW",
+        },
+        select: {
+          transactionNumber: true,
+          provider: true,
+          targetType: true,
+          status: true,
+          amount: true,
+          providerAmount: true,
+          currency: true,
+          externalReference: true,
+          phone: true,
+          providerPhone: true,
+          failureCode: true,
+          failureReason: true,
+          callbackReceivedAt: true,
+          verificationStartedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          branch: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              status: true,
+              paymentStatus: true,
+            },
+          },
+          posCheckout: {
+            select: {
+              id: true,
+              checkoutNumber: true,
+              status: true,
+            },
+          },
+        },
+        orderBy: {
+          updatedAt:
+            "desc",
+        },
+      });
+
+    return payments.map(
+      (payment) => ({
+        ...payment,
+        amount:
+          payment.amount.toFixed(2),
+        providerAmount:
+          payment.providerAmount
+            ?.toFixed(2) ?? null,
+      }),
+    );
   }
 
   private async finalizeVerifiedMpesaPayment(
@@ -370,7 +499,7 @@ export class PaymentsService {
                 verification,
 
               failureReason:
-                "Payment succeeded after inventory reservation expired or was released",
+                "Payment received after inventory reservation expired or was released",
             },
           });
 
