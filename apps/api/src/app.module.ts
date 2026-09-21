@@ -1,4 +1,7 @@
 import { Module } from "@nestjs/common";
+import {
+  ScheduleModule,
+} from "@nestjs/schedule";
 import { AppController } from "./app.controller";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProductsModule } from "./products/products.module";
@@ -36,6 +39,7 @@ import {
 @Module({
   controllers: [AppController],
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
     ProductsModule,
     SalesModule,
