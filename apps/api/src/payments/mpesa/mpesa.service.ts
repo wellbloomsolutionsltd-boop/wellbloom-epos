@@ -10,6 +10,7 @@ export class MpesaService {
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const oauthUrl = process.env.MPESA_OAUTH_URL;
     const stkPushUrl = process.env.MPESA_STK_PUSH_URL;
+    const stkQueryUrl = process.env.MPESA_STK_QUERY_URL;
     const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
     const callbackUrl = process.env.MPESA_CALLBACK_URL;
@@ -19,6 +20,7 @@ export class MpesaService {
       !consumerSecret ||
       !oauthUrl ||
       !stkPushUrl ||
+      !stkQueryUrl ||
       !shortcode ||
       !passkey ||
       !callbackUrl
@@ -33,6 +35,7 @@ export class MpesaService {
       consumerSecret,
       oauthUrl,
       stkPushUrl,
+      stkQueryUrl,
       shortcode,
       passkey,
       callbackUrl,
@@ -145,6 +148,76 @@ export class MpesaService {
         message: "M-Pesa STK request failed",
         darajaResponse: data,
       });
+    }
+
+    return data;
+  }
+
+  async queryStkPush(
+    checkoutRequestId: string,
+  ) {
+    const config =
+      this.getConfig();
+
+    if (
+      !process.env
+        .MPESA_STK_QUERY_URL
+    ) {
+      throw new InternalServerErrorException(
+        "M-Pesa STK query URL is not configured",
+      );
+    }
+
+    const token =
+      await this.getAccessToken();
+
+    const timestamp =
+      this.timestamp();
+
+    const password =
+      Buffer.from(
+        `${config.shortcode}${config.passkey}${timestamp}`,
+      ).toString("base64");
+
+    const response =
+      await fetch(
+        process.env
+          .MPESA_STK_QUERY_URL,
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+
+            "Content-Type":
+              "application/json",
+          },
+
+          body:
+            JSON.stringify({
+              BusinessShortCode:
+                config.shortcode,
+
+              Password:
+                password,
+
+              Timestamp:
+                timestamp,
+
+              CheckoutRequestID:
+                checkoutRequestId,
+            }),
+        },
+      );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+      throw new InternalServerErrorException(
+        "Unable to verify M-Pesa transaction",
+      );
     }
 
     return data;

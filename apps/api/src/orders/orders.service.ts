@@ -325,7 +325,7 @@ export class OrdersService {
   async confirmPaidOrderWithTx(
     tx: Prisma.TransactionClient,
     orderId: string,
-    createdById?: string,
+    actorUserId?: string,
   ) {
     const order =
       await tx.order.findFirst({
@@ -336,28 +336,28 @@ export class OrdersService {
             "AWAITING_PAYMENT",
         },
         include: {
-          items: true,
           reservations: {
             where: {
               status:
                 "ACTIVE",
             },
           },
+          items: true,
         },
       });
 
     if (!order) {
-      throw new NotFoundException(
-        "Order not found or cannot be confirmed",
+      throw new BadRequestException(
+        "Order is no longer awaiting payment",
       );
     }
 
     if (
-      order.reservations.length !==
-      order.items.length
+      order.reservations.length ===
+      0
     ) {
       throw new BadRequestException(
-        "Order reservation records are incomplete",
+        "Order has no active inventory reservations",
       );
     }
 
@@ -442,7 +442,7 @@ export class OrdersService {
 
       if (!inventoryAfter) {
         throw new BadRequestException(
-          "Inventory record missing after ecommerce sale",
+          "Inventory record missing after confirmation",
         );
       }
 
@@ -464,7 +464,7 @@ export class OrdersService {
 
       if (consumed.count !== 1) {
         throw new BadRequestException(
-          "Inventory reservation is inconsistent",
+          "Inventory reservation was already processed",
         );
       }
 
@@ -479,9 +479,7 @@ export class OrdersService {
           type:
             "ECOMMERCE_SALE",
           quantity:
-            new Prisma.Decimal(
-              reservation.quantity,
-            ).neg(),
+            reservation.quantity.neg(),
           quantityBefore:
             inventoryBefore.quantity,
           quantityAfter:
@@ -492,29 +490,13 @@ export class OrdersService {
             order.id,
           referenceNumber:
             order.orderNumber,
-          createdById,
+          createdById:
+            actorUserId,
         },
       });
     }
 
-    return tx.order.findUnique({
-      where: {
-        id:
-          order.id,
-      },
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-        reservations: {
-          include: {
-            product: true,
-          },
-        },
-      },
-    });
+    return order;
   }
 
   async cancelOrder(
