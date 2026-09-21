@@ -46,19 +46,6 @@ export class OrdersController {
     );
   }
 
-  @Post(":id/confirm")
-  confirm(
-    @Param("id")
-    id: string,
-    @CurrentUser()
-    user: AuthenticatedUser,
-  ) {
-    return this.ordersService.confirmOrder(
-      id,
-      user,
-    );
-  }
-
   @Post(":id/cancel")
   cancel(
     @Param("id")

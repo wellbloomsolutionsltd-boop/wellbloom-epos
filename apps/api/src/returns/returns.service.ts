@@ -268,22 +268,85 @@ export class ReturnsService {
           const item
           of returnRecord.items
         ) {
+          const inventoryBefore =
+            await tx.inventory.findUnique({
+              where: {
+                branchId_productId: {
+                  branchId:
+                    returnRecord.branchId,
+                  productId:
+                    item.productId,
+                },
+              },
+            });
+
+          if (!inventoryBefore) {
+            throw new BadRequestException(
+              "Inventory record not found",
+            );
+          }
+
           await tx.inventory.update({
             where: {
               branchId_productId: {
                 branchId:
                   returnRecord.branchId,
-
                 productId:
                   item.productId,
               },
             },
-
             data: {
               quantity: {
                 increment:
                   item.quantity,
               },
+            },
+          });
+
+          const inventoryAfter =
+            await tx.inventory.findUnique({
+              where: {
+                branchId_productId: {
+                  branchId:
+                    returnRecord.branchId,
+                  productId:
+                    item.productId,
+                },
+              },
+            });
+
+          if (!inventoryAfter) {
+            throw new BadRequestException(
+              "Inventory record missing after return",
+            );
+          }
+
+          await tx.inventoryMovement.create({
+            data: {
+              tenantId:
+                returnRecord.tenantId,
+              branchId:
+                returnRecord.branchId,
+              productId:
+                item.productId,
+              type:
+                "SALE_RETURN",
+              quantity:
+                new Prisma.Decimal(
+                  item.quantity,
+                ),
+              quantityBefore:
+                inventoryBefore.quantity,
+              quantityAfter:
+                inventoryAfter.quantity,
+              referenceType:
+                "RETURN",
+              referenceId:
+                returnRecord.id,
+              referenceNumber:
+                returnRecord.returnNumber,
+              createdById:
+                manager.sub,
             },
           });
         }

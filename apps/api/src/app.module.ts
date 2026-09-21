@@ -26,6 +26,12 @@ import {
 import {
   InventoryModule,
 } from "./inventory/inventory.module";
+import {
+  PaymentsModule,
+} from "./payments/payments.module";
+import {
+  PosCheckoutsModule,
+} from "./pos-checkouts/pos-checkouts.module";
 
 @Module({
   controllers: [AppController],
@@ -42,6 +48,8 @@ import {
     ReportsModule,
     OrdersModule,
     InventoryModule,
+    PaymentsModule,
+    PosCheckoutsModule,
   ],
 })
 export class AppModule {}

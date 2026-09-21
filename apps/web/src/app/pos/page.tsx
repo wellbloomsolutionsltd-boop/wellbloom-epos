@@ -107,6 +107,10 @@ export default function PosPage() {
     "CASH" | "MPESA" | "CARD"
   >("CASH");
   const [amountTendered, setAmountTendered] = useState("");
+  const [mpesaPhone, setMpesaPhone] = useState("");
+  const [pendingCheckoutId, setPendingCheckoutId] =
+    useState<string | null>(null);
+  const [mpesaWaiting, setMpesaWaiting] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [completedSale, setCompletedSale] =
     useState<CompletedSale | null>(null);
@@ -211,6 +215,11 @@ export default function PosPage() {
       return;
     }
 
+    if (paymentMethod === "MPESA") {
+      await completeMpesaSale();
+      return;
+    }
+
     const paymentAmount = Number(amountTendered);
 
     if (!paymentAmount || paymentAmount < subtotal) {
@@ -287,6 +296,183 @@ export default function PosPage() {
     } finally {
       setPaymentLoading(false);
     }
+  }
+
+  async function completeMpesaSale() {
+    if (!mpesaPhone.trim()) {
+      setMessage("Enter the customer's M-Pesa phone number.");
+      return;
+    }
+
+    setPaymentLoading(true);
+    setMessage("");
+
+    try {
+      const checkoutResponse = await fetch(
+        "http://localhost:3001/pos-checkouts",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          body: JSON.stringify({
+            customerId: selectedCustomer?.id,
+            items: cart.map((item) => ({
+              productId: item.product.id,
+              quantity: item.quantity,
+            })),
+          }),
+        },
+      );
+
+      if (checkoutResponse.status === 401) {
+        clearSession();
+        router.replace("/login");
+        throw new Error(
+          "Your login session expired. Please sign in again.",
+        );
+      }
+
+      const checkoutData = await checkoutResponse.json();
+
+      if (!checkoutResponse.ok) {
+        throw new Error(
+          checkoutData.message ??
+            "Unable to create M-Pesa checkout",
+        );
+      }
+
+      const checkoutId = checkoutData.checkout.id as string;
+      setPendingCheckoutId(checkoutId);
+
+      const stkResponse = await fetch(
+        "http://localhost:3001/payments/mpesa/pos-stk-push",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          body: JSON.stringify({
+            posCheckoutId: checkoutId,
+            phone: mpesaPhone.trim(),
+          }),
+        },
+      );
+
+      const stkData = await stkResponse.json();
+
+      if (!stkResponse.ok) {
+        throw new Error(
+          stkData.message ??
+            "Unable to initiate M-Pesa payment",
+        );
+      }
+
+      setMpesaWaiting(true);
+      setMessage(
+        "M-Pesa prompt sent. Waiting for payment confirmation...",
+      );
+
+      await waitForMpesaCheckout(checkoutId);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "M-Pesa payment failed",
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
+  async function waitForMpesaCheckout(
+    checkoutId: string,
+  ) {
+    const maximumAttempts = 60;
+
+    for (
+      let attempt = 0;
+      attempt < maximumAttempts;
+      attempt++
+    ) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, 2000),
+      );
+
+      const response = await fetch(
+        `http://localhost:3001/pos-checkouts/${checkoutId}/status`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ??
+            "Unable to check M-Pesa payment status",
+        );
+      }
+
+      if (data.status === "COMPLETED") {
+        const sale = data.sale;
+
+        if (!sale) {
+          throw new Error(
+            "M-Pesa payment completed but sale was not returned",
+          );
+        }
+
+        setCompletedSale({
+          id: sale.id,
+          saleNumber: sale.saleNumber,
+          receiptNumber:
+            sale.receiptNumber ?? sale.saleNumber,
+          subtotal: String(sale.subtotal),
+          discount: String(sale.discountAmount ?? 0),
+          total: String(sale.totalAmount),
+          change: String(sale.changeAmount ?? 0),
+          createdAt: sale.createdAt,
+          branch: sale.branch,
+          items: sale.items,
+          payments: sale.payments,
+        });
+
+        setCart([]);
+        setSelectedCustomer(null);
+        setAmountTendered("");
+        setMpesaPhone("");
+        setPendingCheckoutId(null);
+        setMpesaWaiting(false);
+        setShowPayment(false);
+        setMessage(
+          "M-Pesa payment confirmed. Sale completed.",
+        );
+        return;
+      }
+
+      if (
+        data.status === "CANCELLED" ||
+        data.status === "FAILED" ||
+        data.status === "EXPIRED"
+      ) {
+        setPendingCheckoutId(null);
+        setMpesaWaiting(false);
+        throw new Error(
+          "M-Pesa payment was not completed. Please retry or choose another payment method.",
+        );
+      }
+    }
+
+    setMpesaWaiting(false);
+    throw new Error(
+      "M-Pesa confirmation is taking longer than expected. Check payment status before retrying.",
+    );
   }
 
   async function searchCustomers() {
@@ -867,31 +1053,62 @@ export default function PosPage() {
               </div>
             </div>
 
-            <div className="mt-5">
-              <label
-                htmlFor="amount-tendered"
-                className="mb-2 block font-semibold"
-              >
-                Amount Tendered
-              </label>
-              <input
-                id="amount-tendered"
-                type="number"
-                value={amountTendered}
-                onChange={(event) => setAmountTendered(event.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-xl"
-              />
-            </div>
+            {paymentMethod === "MPESA" ? (
+              <div className="mt-5">
+                <label
+                  htmlFor="mpesa-phone"
+                  className="mb-2 block font-semibold"
+                >
+                  M-Pesa phone number
+                </label>
+                <input
+                  id="mpesa-phone"
+                  type="tel"
+                  value={mpesaPhone}
+                  onChange={(event) =>
+                    setMpesaPhone(event.target.value)
+                  }
+                  placeholder="2547XXXXXXXX"
+                  disabled={mpesaWaiting}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-xl disabled:bg-gray-100"
+                />
+                {mpesaWaiting && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    Waiting for M-Pesa payment confirmation...
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="mt-5">
+                  <label
+                    htmlFor="amount-tendered"
+                    className="mb-2 block font-semibold"
+                  >
+                    Amount Tendered
+                  </label>
+                  <input
+                    id="amount-tendered"
+                    type="number"
+                    value={amountTendered}
+                    onChange={(event) =>
+                      setAmountTendered(event.target.value)
+                    }
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-xl"
+                  />
+                </div>
 
-            <div className="mt-4 flex justify-between rounded-xl bg-gray-50 p-4">
-              <span>Change</span>
-              <span className="font-bold">
-                KES {Math.max(
-                  0,
-                  Number(amountTendered || 0) - subtotal,
-                ).toLocaleString()}
-              </span>
-            </div>
+                <div className="mt-4 flex justify-between rounded-xl bg-gray-50 p-4">
+                  <span>Change</span>
+                  <span className="font-bold">
+                    KES {Math.max(
+                      0,
+                      Number(amountTendered || 0) - subtotal,
+                    ).toLocaleString()}
+                  </span>
+                </div>
+              </>
+            )}
 
             {message && (
               <p className="mt-3 text-sm font-medium text-red-600">
@@ -910,10 +1127,18 @@ export default function PosPage() {
               <button
                 type="button"
                 onClick={completeSale}
-                disabled={paymentLoading}
+                disabled={
+                  paymentLoading ||
+                  mpesaWaiting ||
+                  cart.length === 0
+                }
                 className="rounded-xl bg-green-600 px-4 py-3 font-bold text-white disabled:opacity-50"
               >
-                {paymentLoading ? "Processing..." : "Complete Sale"}
+                {mpesaWaiting
+                  ? "Waiting for M-Pesa..."
+                  : paymentLoading
+                    ? "Processing..."
+                    : "Complete Sale"}
               </button>
             </div>
           </div>

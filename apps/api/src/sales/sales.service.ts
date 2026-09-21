@@ -82,6 +82,12 @@ export class SalesService {
         lineTotal: Prisma.Decimal;
       }[] = [];
 
+      const movementSnapshots: {
+        productId: string;
+        quantityBefore: Prisma.Decimal;
+        quantityAfter: Prisma.Decimal;
+      }[] = [];
+
       let subtotal = new Prisma.Decimal(0);
 
       for (const requestedItem of dto.items) {
@@ -105,7 +111,7 @@ export class SalesService {
         const unitPrice = new Prisma.Decimal(product.sellingPrice);
         const lineTotal = unitPrice.mul(quantity);
 
-        const inventory = await tx.inventory.findUnique({
+        const inventoryBefore = await tx.inventory.findUnique({
           where: {
             branchId_productId: {
               branchId,
@@ -114,41 +120,67 @@ export class SalesService {
           },
         });
 
-        if (!inventory) {
+        if (!inventoryBefore) {
           throw new BadRequestException(
-            `No inventory found for ${product.name}`,
+            `Inventory not found for ${product.name}`,
           );
         }
 
-        const available =
-          new Prisma.Decimal(
-            inventory.quantity,
-          ).sub(
-            inventory.reservedQty,
-          );
+        const updated =
+          await tx.$executeRaw`
+            UPDATE "Inventory"
+            SET
+              "quantity" =
+                "quantity" - ${quantity}
+            WHERE
+              "branchId" = ${user.branchId}
+              AND
+              "productId" = ${product.id}
+              AND
+              (
+                "quantity" - COALESCE(
+                  (
+                    SELECT SUM("quantity")
+                    FROM "InventoryReservation"
+                    WHERE
+                      "tenantId" = ${user.tenantId}
+                      AND
+                      "branchId" = ${user.branchId}
+                      AND
+                      "productId" = ${product.id}
+                      AND
+                      "status" = 'ACTIVE'
+                  ),
+                  0
+                )
+              ) >= ${quantity}
+          `;
 
-        if (
-          available.lessThan(
-            quantity,
-          )
-        ) {
+        if (updated !== 1) {
           throw new BadRequestException(
-            `Insufficient available stock for ${product.name}. Available: ${available.toString()}`,
+            `Insufficient available stock for ${product.name}`,
           );
         }
 
-        await tx.inventory.update({
+        const inventoryAfter = await tx.inventory.findUnique({
           where: {
             branchId_productId: {
-              branchId,
+              branchId: user.branchId!,
               productId: product.id,
             },
           },
-          data: {
-            quantity: {
-              decrement: quantity,
-            },
-          },
+        });
+
+        if (!inventoryAfter) {
+          throw new BadRequestException(
+            "Inventory record missing after sale",
+          );
+        }
+
+        movementSnapshots.push({
+          productId: product.id,
+          quantityBefore: inventoryBefore.quantity,
+          quantityAfter: inventoryAfter.quantity,
         });
 
         calculatedItems.push({
@@ -235,6 +267,34 @@ export class SalesService {
           payments: true,
         },
       });
+
+      for (const item of calculatedItems) {
+        const snapshot = movementSnapshots.find(
+          (entry) => entry.productId === item.productId,
+        );
+
+        if (!snapshot) {
+          throw new BadRequestException(
+            "Inventory movement snapshot missing",
+          );
+        }
+
+        await tx.inventoryMovement.create({
+          data: {
+            tenantId: user.tenantId,
+            branchId: user.branchId!,
+            productId: item.productId,
+            type: "POS_SALE",
+            quantity: item.quantity.neg(),
+            quantityBefore: snapshot.quantityBefore,
+            quantityAfter: snapshot.quantityAfter,
+            referenceType: "SALE",
+            referenceId: sale.id,
+            referenceNumber: sale.saleNumber,
+            createdById: user.sub,
+          },
+        });
+      }
 
       const cashPaymentTotal =
         dto.payments
@@ -331,22 +391,87 @@ export class SalesService {
         }
 
         for (const item of sale.items) {
+          const inventoryBefore =
+            await tx.inventory.findUnique({
+              where: {
+                branchId_productId: {
+                  branchId:
+                    sale.branchId,
+                  productId:
+                    item.productId,
+                },
+              },
+            });
+
+          if (!inventoryBefore) {
+            throw new BadRequestException(
+              "Inventory record missing",
+            );
+          }
+
           await tx.inventory.update({
             where: {
               branchId_productId: {
                 branchId:
                   sale.branchId,
-
                 productId:
                   item.productId,
               },
             },
-
             data: {
               quantity: {
                 increment:
                   item.quantity,
               },
+            },
+          });
+
+          const inventoryAfter =
+            await tx.inventory.findUnique({
+              where: {
+                branchId_productId: {
+                  branchId:
+                    sale.branchId,
+                  productId:
+                    item.productId,
+                },
+              },
+            });
+
+          if (!inventoryAfter) {
+            throw new BadRequestException(
+              "Inventory record missing after void",
+            );
+          }
+
+          await tx.inventoryMovement.create({
+            data: {
+              tenantId:
+                sale.tenantId,
+              branchId:
+                sale.branchId,
+              productId:
+                item.productId,
+              type:
+                "SALE_VOID",
+              quantity:
+                new Prisma.Decimal(
+                  item.quantity,
+                ),
+              quantityBefore:
+                inventoryBefore.quantity,
+              quantityAfter:
+                inventoryAfter.quantity,
+              referenceType:
+                "SALE_VOID",
+              referenceId:
+                sale.id,
+              referenceNumber:
+                sale.saleNumber,
+              notes:
+                reason,
+              createdById:
+                manager.sub,
             },
           });
         }

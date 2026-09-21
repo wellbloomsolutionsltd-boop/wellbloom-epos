@@ -31,6 +31,11 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
+  idempotencyKey?: string;
+
+  @IsOptional()
+  @IsString()
   customerId?: string;
 
   @IsIn([

@@ -9,13 +9,26 @@ import {
 
 import {
   JwtAuthGuard,
+  AuthenticatedUser,
 } from "../auth/jwt-auth.guard";
+
+import {
+  CurrentUser,
+} from "../auth/current-user.decorator";
+
+import {
+  Roles,
+} from "../auth/roles.decorator";
+
+import {
+  RolesGuard,
+} from "../auth/roles.guard";
 
 import {
   InventoryService,
 } from "./inventory.service";
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("inventory")
 export class InventoryController {
   constructor(
@@ -36,5 +49,25 @@ export class InventoryController {
         productId,
         branchId,
       );
+  }
+
+  @Roles(
+    "MANAGER",
+    "TENANT_ADMIN",
+    "SUPER_ADMIN",
+    "INVENTORY_MANAGER",
+    "REPORT_VIEWER",
+  )
+  @Get("products/:productId/movements")
+  movements(
+    @Param("productId")
+    productId: string,
+    @CurrentUser()
+    user: AuthenticatedUser,
+  ) {
+    return this.inventoryService.getProductMovements(
+      productId,
+      user,
+    );
   }
 }
