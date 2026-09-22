@@ -119,4 +119,18 @@ export class ReportsController {
   ) {
     return this.reportsService.getStockValuation(user);
   }
+
+  @Roles(
+    "MANAGER",
+    "TENANT_ADMIN",
+    "SUPER_ADMIN",
+    "ACCOUNTANT",
+    "REPORT_VIEWER",
+  )
+  @Get("payments/reconciliation")
+  getPaymentReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reportsService.getPaymentReconciliation(user);
+  }
 }

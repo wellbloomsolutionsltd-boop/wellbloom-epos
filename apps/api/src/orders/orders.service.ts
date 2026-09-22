@@ -338,6 +338,34 @@ export class OrdersService {
     );
   }
 
+  async getOrder(
+    orderId: string,
+    user: AuthenticatedUser,
+  ) {
+    const order =
+      await this.prisma.order.findFirst({
+        where: {
+          id: orderId,
+          tenantId: user.tenantId,
+        },
+        include: {
+          items: {
+            include: {
+              product: true,
+            },
+          },
+          branch: true,
+          customer: true,
+        },
+      });
+
+    if (!order) {
+      throw new NotFoundException("Order not found");
+    }
+
+    return order;
+  }
+
   async confirmPaidOrderWithTx(
     tx: Prisma.TransactionClient,
     orderId: string,

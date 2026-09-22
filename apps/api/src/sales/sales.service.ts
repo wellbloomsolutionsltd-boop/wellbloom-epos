@@ -31,6 +31,18 @@ export class SalesService {
       );
     }
 
+    if (
+      dto.payments.some(
+        (payment) =>
+          payment.method ===
+          "INSURANCE",
+      )
+    ) {
+      throw new BadRequestException(
+        "Insurance payments require insurance authorization and claims processing",
+      );
+    }
+
     const shift = await this.prisma.shift.findFirst({
       where: {
         tenantId: user.tenantId,

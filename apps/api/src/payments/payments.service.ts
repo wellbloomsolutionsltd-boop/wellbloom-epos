@@ -107,6 +107,98 @@ export class PaymentsService {
       });
   }
 
+  async reviewBankPayment(
+    paymentId: string,
+    decision: "APPROVED" | "REJECTED",
+    reference: string | undefined,
+    manager: AuthenticatedUser,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const payment =
+          await tx.paymentTransaction.findFirst({
+            where: {
+              id: paymentId,
+              tenantId: manager.tenantId,
+              provider: "BANK",
+              status: "PENDING",
+            },
+            include: {
+              order: {
+                include: {
+                  reservations: true,
+                },
+              },
+            },
+          });
+
+        if (!payment) {
+          throw new NotFoundException(
+            "Pending bank payment not found",
+          );
+        }
+
+        if (decision === "REJECTED") {
+          return tx.paymentTransaction.update({
+            where: {
+              id: payment.id,
+            },
+            data: {
+              status: "FAILED",
+              failedAt: new Date(),
+              failureReason:
+                "Bank transfer rejected during verification",
+              externalReference: reference,
+            },
+          });
+        }
+
+        if (!payment.order) {
+          throw new BadRequestException(
+            "Payment has no associated order",
+          );
+        }
+
+        const activeReservations =
+          payment.order.reservations.filter(
+            (reservation) =>
+              reservation.status === "ACTIVE",
+          );
+
+        if (activeReservations.length === 0) {
+          return tx.paymentTransaction.update({
+            where: {
+              id: payment.id,
+            },
+            data: {
+              status: "REQUIRES_REVIEW",
+              externalReference: reference,
+              failureReason:
+                "Bank payment approved after inventory reservation expired",
+            },
+          });
+        }
+
+        await this.ordersService.confirmPaidOrderWithTx(
+          tx,
+          payment.order.id,
+          manager.sub,
+        );
+
+        return tx.paymentTransaction.update({
+          where: {
+            id: payment.id,
+          },
+          data: {
+            status: "SUCCEEDED",
+            externalReference: reference,
+            completedAt: new Date(),
+          },
+        });
+      },
+    );
+  }
+
   async initiateOrderCard(
     orderId: string,
     user: AuthenticatedUser,
@@ -563,7 +655,7 @@ export class PaymentsService {
     });
   }
 
-  async getMpesaPaymentStatus(
+  async getPaymentStatus(
     transactionNumber: string,
     user: AuthenticatedUser,
   ) {
@@ -573,8 +665,6 @@ export class PaymentsService {
           transactionNumber,
           tenantId:
             user.tenantId,
-          provider:
-            "MPESA",
         },
         select: {
           transactionNumber: true,
@@ -583,29 +673,50 @@ export class PaymentsService {
           amount: true,
           currency: true,
           externalReference: true,
+          failureReason: true,
+          completedAt: true,
+          createdAt: true,
         },
       });
 
     if (!payment) {
       throw new NotFoundException(
-        "M-Pesa payment not found",
+        "Payment not found",
       );
     }
 
-    return {
-      transactionNumber:
-        payment.transactionNumber,
-      provider:
-        payment.provider,
-      status:
-        payment.status,
-      amount:
-        payment.amount.toFixed(2),
-      currency:
-        payment.currency,
-      externalReference:
-        payment.externalReference,
-    };
+    return payment;
+  }
+
+  async findAll(
+    user: AuthenticatedUser,
+  ) {
+    return this.prisma.paymentTransaction.findMany({
+      where: {
+        tenantId: user.tenantId,
+        ...(user.branchId
+          ? {
+              branchId: user.branchId,
+            }
+          : {}),
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+          },
+        },
+        sale: {
+          select: {
+            saleNumber: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 500,
+    });
   }
 
   async getPaymentReviewQueue(

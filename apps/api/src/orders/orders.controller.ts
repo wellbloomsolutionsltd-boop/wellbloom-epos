@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Inject,
   Param,
   Post,
@@ -57,5 +58,13 @@ export class OrdersController {
       id,
       user,
     );
+  }
+
+  @Get(":id")
+  getOne(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.ordersService.getOrder(id, user);
   }
 }

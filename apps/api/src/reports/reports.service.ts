@@ -273,6 +273,86 @@ export class ReportsService {
     };
   }
 
+  async getPaymentReconciliation(
+    user: AuthenticatedUser,
+  ) {
+    const payments =
+      await this.prisma.paymentTransaction.findMany({
+        where: {
+          tenantId:
+            user.tenantId,
+          ...(user.branchId
+            ? {
+                branchId:
+                  user.branchId,
+              }
+            : {}),
+        },
+        select: {
+          transactionNumber: true,
+          provider: true,
+          targetType: true,
+          status: true,
+          amount: true,
+          providerAmount: true,
+          currency: true,
+          externalReference: true,
+          providerRequestId: true,
+          providerCheckoutId: true,
+          failureCode: true,
+          failureReason: true,
+          callbackReceivedAt: true,
+          completedAt: true,
+          createdAt: true,
+          branch: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              total: true,
+              status: true,
+              paymentStatus: true,
+            },
+          },
+          sale: {
+            select: {
+              id: true,
+              saleNumber: true,
+              totalAmount: true,
+              status: true,
+            },
+          },
+          posCheckout: {
+            select: {
+              id: true,
+              checkoutNumber: true,
+              totalAmount: true,
+              status: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt:
+            "desc",
+        },
+        take: 500,
+      });
+
+    return payments.map((payment) => ({
+      ...payment,
+      amount:
+        payment.amount.toFixed(2),
+      providerAmount:
+        payment.providerAmount
+          ?.toFixed(2) ?? null,
+    }));
+  }
+
   async getTodayDashboard(
     user: AuthenticatedUser,
   ) {
