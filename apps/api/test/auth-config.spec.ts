@@ -7,7 +7,7 @@ import {
 } from "../src/auth/jwt.config";
 
 const jwtEnvironmentNames = [
-  "JWT_SECRET",
+  "JWT_ACCESS_SECRET",
   "JWT_EXPIRES_IN",
   "JWT_REFRESH_SECRET",
   "JWT_REFRESH_EXPIRES_IN",
@@ -55,7 +55,7 @@ function withJwtEnvironment(
 test("JWT configuration reads access and refresh settings", () => {
   withJwtEnvironment(
     {
-      JWT_SECRET: "test-access-secret",
+      JWT_ACCESS_SECRET: "test-access-secret",
       JWT_EXPIRES_IN: "2h",
       JWT_REFRESH_SECRET: "test-refresh-secret",
       JWT_REFRESH_EXPIRES_IN: "14d",
@@ -80,7 +80,7 @@ test("JWT configuration reads access and refresh settings", () => {
 test("JWT configuration uses the documented expiry defaults", () => {
   withJwtEnvironment(
     {
-      JWT_SECRET: "test-access-secret",
+      JWT_ACCESS_SECRET: "test-access-secret",
       JWT_REFRESH_SECRET: "test-refresh-secret",
     },
     () => {
@@ -92,10 +92,10 @@ test("JWT configuration uses the documented expiry defaults", () => {
   );
 });
 
-test("access tokens are signed and verified with JWT_SECRET", () => {
+test("access tokens are signed and verified with JWT_ACCESS_SECRET", () => {
   withJwtEnvironment(
     {
-      JWT_SECRET: "test-access-secret",
+      JWT_ACCESS_SECRET: "test-access-secret",
       JWT_REFRESH_SECRET: "test-refresh-secret",
     },
     () => {
@@ -118,7 +118,7 @@ test("JWT configuration rejects missing secrets", () => {
   withJwtEnvironment({}, () => {
     assert.throws(
       () => getJwtEnvironmentConfig(),
-      /Missing required JWT environment variables: JWT_SECRET, JWT_REFRESH_SECRET/,
+      /Missing required JWT environment variables: JWT_ACCESS_SECRET, JWT_REFRESH_SECRET/,
     );
   });
 });
@@ -126,13 +126,13 @@ test("JWT configuration rejects missing secrets", () => {
 test("JWT configuration rejects a shared signing secret", () => {
   withJwtEnvironment(
     {
-      JWT_SECRET: "same-test-secret",
+      JWT_ACCESS_SECRET: "same-test-secret",
       JWT_REFRESH_SECRET: "same-test-secret",
     },
     () => {
       assert.throws(
         () => getJwtEnvironmentConfig(),
-        /JWT_SECRET and JWT_REFRESH_SECRET must be different/,
+        /JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different/,
       );
     },
   );
