@@ -176,6 +176,7 @@ model User {
   salesVoided                  Sale[]                @relation("SaleVoidedBy")
   inventoryMovementsCreated    InventoryMovement[]
   posCheckouts                 PosCheckout[]
+  refreshTokenSessions         RefreshTokenSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -183,6 +184,28 @@ model User {
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([branchId])
+}
+
+model RefreshTokenSession {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenId   String @unique
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  replacedById String?
+  replacedBy   RefreshTokenSession?  @relation("RefreshTokenRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces     RefreshTokenSession[] @relation("RefreshTokenRotation")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model Customer {

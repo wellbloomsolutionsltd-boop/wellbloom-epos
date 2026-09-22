@@ -20,6 +20,11 @@ export type AuthenticatedRequest = Request & {
   user?: AuthenticatedUser;
 };
 
+type AccessTokenPayload = AuthenticatedUser & {
+  tokenUse: "access";
+  jti: string;
+};
+
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
@@ -44,11 +49,26 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload =
-        await this.jwtService.verifyAsync<AuthenticatedUser>(
+        await this.jwtService.verifyAsync<AccessTokenPayload>(
           token,
         );
 
-      request.user = payload;
+      if (
+        payload.tokenUse !== "access" ||
+        typeof payload.jti !== "string"
+      ) {
+        throw new Error(
+          "Unexpected token purpose",
+        );
+      }
+
+      request.user = {
+        sub: payload.sub,
+        tenantId: payload.tenantId,
+        branchId: payload.branchId,
+        role: payload.role,
+        email: payload.email,
+      };
     } catch {
       throw new UnauthorizedException(
         "Invalid or expired token",

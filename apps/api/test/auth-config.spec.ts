@@ -122,3 +122,18 @@ test("JWT configuration rejects missing secrets", () => {
     );
   });
 });
+
+test("JWT configuration rejects a shared signing secret", () => {
+  withJwtEnvironment(
+    {
+      JWT_SECRET: "same-test-secret",
+      JWT_REFRESH_SECRET: "same-test-secret",
+    },
+    () => {
+      assert.throws(
+        () => getJwtEnvironmentConfig(),
+        /JWT_SECRET and JWT_REFRESH_SECRET must be different/,
+      );
+    },
+  );
+});

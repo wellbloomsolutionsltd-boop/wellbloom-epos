@@ -5,6 +5,9 @@ import {
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
+import {
+  createCorsOptions,
+} from "./cors.config";
 
 dotenv.config({
   path: path.resolve(__dirname, "../../../.env"),
@@ -20,7 +23,9 @@ async function bootstrap() {
     }),
   );
 
-  app.enableCors();
+  app.enableCors(
+    createCorsOptions(),
+  );
 
   await app.listen(3001);
 

@@ -13,6 +13,9 @@ import {
   JwtAuthGuard,
 } from "./jwt-auth.guard";
 import { LoginDto } from "./dto/login.dto";
+import {
+  RefreshTokenDto,
+} from "./dto/refresh-token.dto";
 
 @Controller("auth")
 export class AuthController {
@@ -26,6 +29,35 @@ export class AuthController {
     @Body() dto: LoginDto,
   ) {
     return this.authService.login(dto);
+  }
+
+  @Post("refresh")
+  refresh(
+    @Body() dto: RefreshTokenDto,
+  ) {
+    return this.authService.refresh(
+      dto.refreshToken,
+    );
+  }
+
+  @Post("logout")
+  logout(
+    @Body() dto: RefreshTokenDto,
+  ) {
+    return this.authService.logout(
+      dto.refreshToken,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post("logout-all")
+  logoutAll(
+    @CurrentUser()
+    user: AuthenticatedUser,
+  ) {
+    return this.authService.logoutAll(
+      user.sub,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
