@@ -14,6 +14,9 @@ import {
 } from "../pos-checkouts/pos-checkouts.service";
 import { PrismaService } from "../prisma/prisma.service";
 import {
+  CardService,
+} from "./card/card.service";
+import {
   getCallbackValue,
 } from "./mpesa/mpesa-callback";
 import { MpesaService } from "./mpesa/mpesa.service";
@@ -36,7 +39,262 @@ export class PaymentsService {
     @Inject(PosCheckoutsService)
     private readonly posCheckoutsService:
       PosCheckoutsService,
+
+    @Inject(CardService)
+    private readonly cardService:
+      CardService,
   ) {}
+
+  async initiateBankPayment(
+    orderId: string,
+    reference: string | undefined,
+    user: AuthenticatedUser,
+  ) {
+    const order =
+      await this.prisma.order.findFirst({
+        where: {
+          id:
+            orderId,
+
+          tenantId:
+            user.tenantId,
+
+          status:
+            "AWAITING_PAYMENT",
+        },
+      });
+
+    if (!order) {
+      throw new NotFoundException(
+        "Order is not awaiting payment",
+      );
+    }
+
+    return this.prisma
+      .paymentTransaction
+      .create({
+        data: {
+          transactionNumber:
+            `PAY-${Date.now()}`,
+
+          tenantId:
+            order.tenantId,
+
+          branchId:
+            order.branchId,
+
+          targetType:
+            "ORDER",
+
+          orderId:
+            order.id,
+
+          provider:
+            "BANK",
+
+          status:
+            "PENDING",
+
+          amount:
+            order.total,
+
+          currency:
+            "KES",
+
+          externalReference:
+            reference,
+        },
+      });
+  }
+
+  async initiateOrderCard(
+    orderId: string,
+    user: AuthenticatedUser,
+  ) {
+    const order =
+      await this.prisma.order.findFirst({
+        where: {
+          id:
+            orderId,
+
+          tenantId:
+            user.tenantId,
+
+          status:
+            "AWAITING_PAYMENT",
+
+          paymentStatus: {
+            in: [
+              "UNPAID",
+              "PENDING",
+            ],
+          },
+        },
+
+        include: {
+          customer: true,
+        },
+      });
+
+    if (!order) {
+      throw new NotFoundException(
+        "Order is not awaiting payment",
+      );
+    }
+
+    const existing =
+      await this.prisma
+        .paymentTransaction
+        .findFirst({
+          where: {
+            orderId:
+              order.id,
+
+            provider:
+              "CARD",
+
+            status: {
+              in: [
+                "INITIATED",
+                "PENDING",
+                "VERIFYING",
+              ],
+            },
+          },
+        });
+
+    if (existing) {
+      throw new BadRequestException(
+        "A card payment is already pending for this order",
+      );
+    }
+
+    const transactionNumber =
+      `PAY-${Date.now()}`;
+
+    const payment =
+      await this.prisma
+        .paymentTransaction
+        .create({
+          data: {
+            transactionNumber,
+
+            tenantId:
+              order.tenantId,
+
+            branchId:
+              order.branchId,
+
+            targetType:
+              "ORDER",
+
+            orderId:
+              order.id,
+
+            provider:
+              "CARD",
+
+            status:
+              "INITIATED",
+
+            amount:
+              order.total,
+
+            currency:
+              "KES",
+          },
+        });
+
+    try {
+      const providerResponse =
+        await this.cardService
+          .createPayment({
+            amount:
+              Number(
+                order.total,
+              ),
+
+            currency:
+              "KES",
+
+            reference:
+              order.orderNumber,
+
+            customer:
+              order.customer
+                ? {
+                    name:
+                      `${order.customer.firstName} ${order.customer.lastName ?? ""}`.trim(),
+
+                    email:
+                      order.customer.email ??
+                      undefined,
+
+                    phone:
+                      order.customer.phone ??
+                      undefined,
+                  }
+                : undefined,
+          });
+
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "PENDING",
+
+            providerRequestId:
+              providerResponse
+                .providerRequestId,
+
+            rawResponse:
+              providerResponse
+                .rawResponse as any,
+          },
+        });
+
+      return {
+        transactionNumber,
+
+        status:
+          "PENDING",
+
+        checkoutUrl:
+          providerResponse
+            .checkoutUrl,
+      };
+    } catch (error) {
+      await this.prisma
+        .paymentTransaction
+        .update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "FAILED",
+
+            failedAt:
+              new Date(),
+
+            failureReason:
+              error instanceof Error
+                ? error.message
+                : "Card payment initiation failed",
+          },
+        });
+
+      throw error;
+    }
+  }
 
   async initiateOrderMpesa(
     orderId: string,
@@ -415,6 +673,205 @@ export class PaymentsService {
           payment.providerAmount
             ?.toFixed(2) ?? null,
       }),
+    );
+  }
+
+  private async finalizeVerifiedCardPayment(
+    paymentId: string,
+    verification: {
+      successful: boolean;
+      amount?: number;
+      externalReference?: string;
+      rawResponse: unknown;
+    },
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const payment =
+          await tx.paymentTransaction
+            .findUnique({
+              where: {
+                id:
+                  paymentId,
+              },
+
+              include: {
+                order: {
+                  include: {
+                    reservations:
+                      true,
+                  },
+                },
+              },
+            });
+
+        if (!payment) {
+          throw new NotFoundException(
+            "Payment not found",
+          );
+        }
+
+        if (
+          payment.status ===
+          "SUCCEEDED"
+        ) {
+          return {
+            success: true,
+          };
+        }
+
+        if (
+          !verification.successful
+        ) {
+          await tx.paymentTransaction.update({
+            where: {
+              id:
+                payment.id,
+            },
+
+            data: {
+              status:
+                "FAILED",
+
+              failedAt:
+                new Date(),
+
+              rawVerification:
+                verification
+                  .rawResponse as any,
+            },
+          });
+
+          return {
+            success: false,
+          };
+        }
+
+        const providerAmount =
+          new Prisma.Decimal(
+            verification.amount ??
+              0,
+          );
+
+        if (
+          !providerAmount.equals(
+            payment.amount,
+          )
+        ) {
+          await tx.paymentTransaction.update({
+            where: {
+              id:
+                payment.id,
+            },
+
+            data: {
+              status:
+                "REQUIRES_REVIEW",
+
+              providerAmount,
+
+              failureReason:
+                "Card payment amount mismatch",
+
+              rawVerification:
+                verification
+                  .rawResponse as any,
+            },
+          });
+
+          return {
+            success: false,
+            requiresReview:
+              true,
+          };
+        }
+
+        if (!payment.order) {
+          throw new BadRequestException(
+            "Card payment has no associated order",
+          );
+        }
+
+        const activeReservations =
+          payment.order
+            .reservations
+            .filter(
+              (reservation) =>
+                reservation.status ===
+                "ACTIVE",
+            );
+
+        if (
+          activeReservations.length ===
+          0
+        ) {
+          await tx.paymentTransaction.update({
+            where: {
+              id:
+                payment.id,
+            },
+
+            data: {
+              status:
+                "REQUIRES_REVIEW",
+
+              externalReference:
+                verification
+                  .externalReference,
+
+              providerAmount,
+
+              failureReason:
+                "Card payment succeeded after reservation expired or order became unavailable",
+
+              rawVerification:
+                verification
+                  .rawResponse as any,
+            },
+          });
+
+          return {
+            success: true,
+            requiresReview:
+              true,
+          };
+        }
+
+        await this.ordersService
+          .confirmPaidOrderWithTx(
+            tx,
+            payment.order.id,
+          );
+
+        await tx.paymentTransaction.update({
+          where: {
+            id:
+              payment.id,
+          },
+
+          data: {
+            status:
+              "SUCCEEDED",
+
+            externalReference:
+              verification
+                .externalReference,
+
+            providerAmount,
+
+            completedAt:
+              new Date(),
+
+            rawVerification:
+              verification
+                .rawResponse as any,
+          },
+        });
+
+        return {
+          success: true,
+        };
+      },
     );
   }
 
