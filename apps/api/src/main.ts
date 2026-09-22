@@ -1,5 +1,6 @@
 import path from "node:path";
 import dotenv from "dotenv";
+import helmet from "helmet";
 import {
   ValidationPipe,
 } from "@nestjs/common";
@@ -15,6 +16,10 @@ dotenv.config({
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(
+    helmet(),
+  );
 
   app.useGlobalPipes(
     new ValidationPipe({
