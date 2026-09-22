@@ -1,4 +1,8 @@
-import { Module } from "@nestjs/common";
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+} from "@nestjs/common";
 import {
   APP_GUARD,
 } from "@nestjs/core";
@@ -45,6 +49,9 @@ import {
 import {
   PricingModule,
 } from "./pricing/pricing.module";
+import {
+  RequestIdMiddleware,
+} from "./common/middleware/request-id.middleware";
 
 @Module({
   controllers: [AppController],
@@ -82,4 +89,16 @@ import {
     },
   ],
 })
-export class AppModule {}
+export class AppModule
+  implements NestModule
+{
+  configure(
+    consumer: MiddlewareConsumer,
+  ) {
+    consumer
+      .apply(
+        RequestIdMiddleware,
+      )
+      .forRoutes("*");
+  }
+}
