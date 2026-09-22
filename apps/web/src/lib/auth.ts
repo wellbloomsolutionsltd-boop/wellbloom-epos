@@ -1,3 +1,17 @@
+/**
+ * DEVELOPMENT-ONLY AUTH STORAGE
+ *
+ * This localStorage adapter exists only for the current local MVP. Browser
+ * JavaScript can read localStorage, so this must not be treated as the
+ * production session architecture and refresh tokens must never be added
+ * here.
+ *
+ * TODO(security/gui-auth): replace this adapter during the GUI/auth pass with
+ * a server-managed session using Secure, HttpOnly, SameSite cookies over
+ * HTTPS. Update frontend requests to use the cookie-based session while the
+ * API continues validating authentication and authorization server-side.
+ */
+
 export type AuthUser = {
   id: string;
   firstName: string;
@@ -25,6 +39,7 @@ export type AuthSession = {
 
 const SESSION_KEY = "wellbloom_pos_session";
 
+/** @deprecated Development-only localStorage session adapter. */
 export function saveSession(
   session: AuthSession,
 ) {
@@ -38,6 +53,7 @@ export function saveSession(
   );
 }
 
+/** @deprecated Development-only localStorage session adapter. */
 export function getSession():
   | AuthSession
   | null {
@@ -63,6 +79,7 @@ export function getSession():
   }
 }
 
+/** @deprecated Development-only localStorage session adapter. */
 export function clearSession() {
   if (typeof window === "undefined") {
     return;
