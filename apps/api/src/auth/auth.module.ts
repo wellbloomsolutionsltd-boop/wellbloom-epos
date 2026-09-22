@@ -5,6 +5,9 @@ import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { RolesGuard } from "./roles.guard";
 import { UsersModule } from "../users/users.module";
+import {
+  createAccessTokenJwtOptions,
+} from "./jwt.config";
 
 @Module({
   imports: [
@@ -12,13 +15,8 @@ import { UsersModule } from "../users/users.module";
 
     JwtModule.registerAsync({
       global: true,
-      useFactory: () => ({
-        secret: process.env.JWT_SECRET,
-
-        signOptions: {
-          expiresIn: "12h",
-        },
-      }),
+      useFactory:
+        createAccessTokenJwtOptions,
     }),
   ],
 
