@@ -12,6 +12,7 @@ import {
 import {
   PrismaService,
 } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 
 import {
   AuthenticatedUser,
@@ -31,6 +32,9 @@ export class ReturnsService {
     @Inject(PrismaService)
     private readonly prisma:
       PrismaService,
+    @Inject(AuditService)
+    private readonly auditService:
+      AuditService,
   ) {}
 
   async requestReturn(
@@ -517,6 +521,25 @@ export class ReturnsService {
             });
           }
         }
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: returnRecord.tenantId,
+            userId: manager.sub,
+            action: "RETURN_APPROVED",
+            entityType: "RETURN",
+            entityId: returnRecord.id,
+            metadata: {
+              returnNumber:
+                returnRecord.returnNumber,
+              refundAmount:
+                returnRecord.refundAmount.toString(),
+              refundMethod:
+                returnRecord.refundMethod,
+            },
+          },
+        );
 
         return completed;
       },

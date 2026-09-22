@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { SetProductPriceDto } from "./dto/set-product-price.dto";
 
 @Injectable()
@@ -16,6 +17,8 @@ export class PricingService {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(AuditService)
+    private readonly auditService: AuditService,
   ) {}
 
   async resolveProductPrice(params: {
@@ -121,6 +124,7 @@ export class PricingService {
   async setProductPrice(
     dto: SetProductPriceDto,
     tenantId: string,
+    actorUserId?: string,
   ) {
     const product = await this.prisma.product.findFirst({
       where: {
@@ -156,20 +160,38 @@ export class PricingService {
       );
     }
 
-    return this.prisma.productPrice.create({
-      data: {
+    return this.prisma.$transaction(async (tx) => {
+      const price = await tx.productPrice.create({
+        data: {
+          tenantId,
+          productId: dto.productId,
+          branchId: dto.branchId,
+          channel: dto.channel,
+          price: new Prisma.Decimal(dto.price),
+          startsAt: dto.startsAt
+            ? new Date(dto.startsAt)
+            : null,
+          endsAt: dto.endsAt
+            ? new Date(dto.endsAt)
+            : null,
+        },
+      });
+
+      await this.auditService.createWithTx(tx, {
         tenantId,
-        productId: dto.productId,
-        branchId: dto.branchId,
-        channel: dto.channel,
-        price: new Prisma.Decimal(dto.price),
-        startsAt: dto.startsAt
-          ? new Date(dto.startsAt)
-          : null,
-        endsAt: dto.endsAt
-          ? new Date(dto.endsAt)
-          : null,
-      },
+        userId: actorUserId,
+        action: "PRODUCT_PRICE_CHANGED",
+        entityType: "PRODUCT_PRICE",
+        entityId: price.id,
+        metadata: {
+          productId: dto.productId,
+          branchId: dto.branchId ?? null,
+          channel: dto.channel,
+          price: price.price.toString(),
+        },
+      });
+
+      return price;
     });
   }
 }

@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 
 import {
   AuthenticatedUser,
@@ -36,6 +37,8 @@ export class ShiftsService {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(AuditService)
+    private readonly auditService: AuditService,
   ) {}
 
   async getCurrentShift(
@@ -151,6 +154,17 @@ export class ShiftsService {
               "Shift opening float",
           },
         });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: user.tenantId,
+            userId: user.sub,
+            action: "SHIFT_OPENED",
+            entityType: "SHIFT",
+            entityId: shift.id,
+          },
+        );
 
         return tx.shift.findUnique({
           where: {
@@ -338,7 +352,8 @@ export class ShiftsService {
             },
           });
 
-        return tx.cashMovementRequest.update({
+        const reviewed =
+          await tx.cashMovementRequest.update({
           where: {
             id:
               request.id,
@@ -364,7 +379,25 @@ export class ShiftsService {
           include: {
             movement: true,
           },
-        });
+          });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: request.tenantId,
+            userId: manager.sub,
+            action: "CASH_MOVEMENT_APPROVED",
+            entityType: "CASH_MOVEMENT_REQUEST",
+            entityId: request.id,
+            metadata: {
+              movementId: movement.id,
+              type: request.type,
+              amount: request.amount.toString(),
+            },
+          },
+        );
+
+        return reviewed;
       },
     );
   }
@@ -611,7 +644,8 @@ export class ShiftsService {
           },
         });
 
-        return tx.shift.update({
+        const closedShift =
+          await tx.shift.update({
           where: {
             id: shift.id,
           },
@@ -658,7 +692,24 @@ export class ShiftsService {
               },
             },
           },
-        });
+          });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: user.tenantId,
+            userId: user.sub,
+            action: "SHIFT_CLOSED",
+            entityType: "SHIFT",
+            entityId: shift.id,
+            metadata: {
+              cashDifference:
+                cashDifference.toString(),
+            },
+          },
+        );
+
+        return closedShift;
       },
     );
   }

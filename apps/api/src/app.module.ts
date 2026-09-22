@@ -59,6 +59,9 @@ import {
 import {
   HealthModule,
 } from "./health/health.module";
+import {
+  AuditModule,
+} from "./audit/audit.module";
 
 @Module({
   controllers: [AppController],
@@ -89,6 +92,7 @@ import {
     PosCheckoutsModule,
     PricingModule,
     HealthModule,
+    AuditModule,
   ],
   providers: [
     {

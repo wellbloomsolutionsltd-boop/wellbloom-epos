@@ -13,6 +13,7 @@ import {
 import {
   PrismaService,
 } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 
 import {
   AuthenticatedUser,
@@ -27,6 +28,8 @@ export class EndOfDayService {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(AuditService)
+    private readonly auditService: AuditService,
   ) {}
 
   private getBusinessDayRange(
@@ -319,7 +322,8 @@ export class EndOfDayService {
           );
         }
 
-        return tx.endOfDay.upsert({
+        const closed =
+          await tx.endOfDay.upsert({
           where: {
             tenantId_branchId_businessDate: {
               tenantId:
@@ -411,7 +415,25 @@ export class EndOfDayService {
               },
             },
           },
-        });
+          });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: user.tenantId,
+            userId: user.sub,
+            action: "END_OF_DAY_CLOSED",
+            entityType: "END_OF_DAY",
+            entityId: closed.id,
+            metadata: {
+              branchId: user.branchId,
+              businessDate:
+                closed.businessDate.toISOString(),
+            },
+          },
+        );
+
+        return closed;
       },
     );
   }

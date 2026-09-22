@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { PricingService } from "../pricing/pricing.service";
+import { AuditService } from "../audit/audit.service";
 import { CreateSaleDto } from "./dto/create-sale.dto";
 
 @Injectable()
@@ -17,6 +18,8 @@ export class SalesService {
     private readonly prisma: PrismaService,
     @Inject(PricingService)
     private readonly pricingService: PricingService,
+    @Inject(AuditService)
+    private readonly auditService: AuditService,
   ) {}
 
   async createSale(
@@ -574,7 +577,8 @@ export class SalesService {
           });
         }
 
-        return tx.sale.update({
+        const voidedSale =
+          await tx.sale.update({
           where: {
             id:
               sale.id,
@@ -623,7 +627,24 @@ export class SalesService {
 
             payments: true,
           },
-        });
+          });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: sale.tenantId,
+            userId: manager.sub,
+            action: "SALE_VOIDED",
+            entityType: "SALE",
+            entityId: sale.id,
+            metadata: {
+              saleNumber: sale.saleNumber,
+              reason,
+            },
+          },
+        );
+
+        return voidedSale;
       },
     );
   }

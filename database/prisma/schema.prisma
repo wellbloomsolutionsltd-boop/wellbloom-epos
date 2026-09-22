@@ -27,6 +27,7 @@ model Tenant {
   paymentTransactions   PaymentTransaction[]
   posCheckouts          PosCheckout[]
   productPrices         ProductPrice[]
+  auditLogs             AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -177,6 +178,7 @@ model User {
   inventoryMovementsCreated    InventoryMovement[]
   posCheckouts                 PosCheckout[]
   refreshTokenSessions         RefreshTokenSession[]
+  auditLogs                    AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -192,7 +194,7 @@ model RefreshTokenSession {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  tokenId   String @unique
+  tokenId   String    @unique
   tokenHash String
   expiresAt DateTime
   revokedAt DateTime?
@@ -206,6 +208,34 @@ model RefreshTokenSession {
 
   @@index([userId, revokedAt])
   @@index([expiresAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action String
+
+  entityType String?
+  entityId   String?
+
+  requestId String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
 }
 
 model Customer {

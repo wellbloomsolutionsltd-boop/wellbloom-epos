@@ -18,6 +18,7 @@ import {
 import type {
   AuthenticatedUser,
 } from "./jwt-auth.guard";
+import { AuditService } from "../audit/audit.service";
 
 type TokenPurpose = "access" | "refresh";
 
@@ -33,6 +34,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     @Inject(JwtService)
     private readonly jwtService: JwtService,
+    @Inject(AuditService)
+    private readonly auditService: AuditService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -44,6 +47,8 @@ export class AuthService {
       });
 
     if (!tenant) {
+      await this.recordLoginFailure();
+
       throw new UnauthorizedException(
         "Invalid login credentials",
       );
@@ -65,6 +70,11 @@ export class AuthService {
       });
 
     if (!user || !user.isActive) {
+      await this.recordLoginFailure(
+        tenant.id,
+        user?.id,
+      );
+
       throw new UnauthorizedException(
         "Invalid login credentials",
       );
@@ -77,6 +87,11 @@ export class AuthService {
       );
 
     if (!passwordValid) {
+      await this.recordLoginFailure(
+        tenant.id,
+        user.id,
+      );
+
       throw new UnauthorizedException(
         "Invalid login credentials",
       );
@@ -95,7 +110,28 @@ export class AuthService {
     };
 
     const tokens =
-      await this.issueTokenPair(payload);
+      await this.prisma.$transaction(
+        async (tx) => {
+          const issued =
+            await this.issueTokenPair(
+              payload,
+              tx,
+            );
+
+          await this.auditService.createWithTx(
+            tx,
+            {
+              tenantId: user.tenantId,
+              userId: user.id,
+              action: "LOGIN_SUCCESS",
+              entityType: "USER",
+              entityId: user.id,
+            },
+          );
+
+          return issued;
+        },
+      );
 
     return {
       accessToken: tokens.accessToken,
@@ -378,6 +414,29 @@ export class AuthService {
     return new UnauthorizedException(
       "Invalid or expired refresh token",
     );
+  }
+
+  private async recordLoginFailure(
+    tenantId?: string,
+    userId?: string,
+  ) {
+    try {
+      await this.auditService.create({
+        tenantId,
+        userId,
+        action: "LOGIN_FAILURE",
+        entityType: userId
+          ? "USER"
+          : undefined,
+        entityId: userId,
+        metadata: {
+          reason: "INVALID_CREDENTIALS",
+        },
+      });
+    } catch {
+      // Authentication failures must remain fail-closed
+      // even when audit persistence is unavailable.
+    }
   }
 
   private hasValidUserContext(

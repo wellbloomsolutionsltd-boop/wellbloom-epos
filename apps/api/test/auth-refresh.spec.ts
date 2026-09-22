@@ -102,7 +102,22 @@ function createHarness(options: {
   };
   const state = {
     sessions: [] as TestSession[],
+    auditLogs: [] as any[],
     user,
+  };
+
+  const auditService: any = {
+    create: async (input: any) => {
+      state.auditLogs.push(input);
+      return input;
+    },
+    createWithTx: async (
+      _tx: any,
+      input: any,
+    ) => {
+      state.auditLogs.push(input);
+      return input;
+    },
   };
 
   const refreshTokenSession = {
@@ -190,6 +205,7 @@ function createHarness(options: {
     service: new AuthService(
       prisma,
       new JwtService(),
+      auditService,
     ),
     state,
   };
@@ -258,6 +274,11 @@ test("login returns tokens and creates an active hashed refresh session", async 
   assert.equal(typeof result.accessToken, "string");
   assert.equal(typeof result.refreshToken, "string");
   assert.equal(state.sessions.length, 1);
+  assert.equal(state.auditLogs.length, 1);
+  assert.equal(
+    state.auditLogs[0].action,
+    "LOGIN_SUCCESS",
+  );
   assert.equal(state.sessions[0].revokedAt, null);
   assert.equal(
     state.sessions[0].tokenHash,
@@ -299,6 +320,36 @@ test("login returns tokens and creates an active hashed refresh session", async 
   assert.equal(accessPayload.tenantId, tenant.id);
   assert.equal(accessPayload.branchId, branch.id);
   assert.equal(accessPayload.role, "MANAGER");
+});
+
+test("failed login records a safe audit event", async () => {
+  const passwordHash =
+    await bcrypt.hash("correct-password", 4);
+  const { service, state } = createHarness({
+    passwordHash,
+  });
+
+  await assert.rejects(
+    () => service.login({
+      tenantCode: "wellbloom",
+      email: "manager@example.test",
+      password: "wrong-password",
+    }),
+    UnauthorizedException,
+  );
+
+  assert.deepEqual(state.auditLogs, [
+    {
+      tenantId: "tenant-1",
+      userId: "user-1",
+      action: "LOGIN_FAILURE",
+      entityType: "USER",
+      entityId: "user-1",
+      metadata: {
+        reason: "INVALID_CREDENTIALS",
+      },
+    },
+  ]);
 });
 
 test("valid refresh revokes the old session and creates a new one", async () => {

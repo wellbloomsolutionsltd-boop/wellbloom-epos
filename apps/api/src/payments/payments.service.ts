@@ -3,6 +3,8 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
@@ -13,6 +15,7 @@ import {
   PosCheckoutsService,
 } from "../pos-checkouts/pos-checkouts.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import {
   CardService,
 } from "./card/card.service";
@@ -40,9 +43,14 @@ export class PaymentsService {
     private readonly posCheckoutsService:
       PosCheckoutsService,
 
+    @Optional()
     @Inject(CardService)
     private readonly cardService:
-      CardService,
+      CardService | undefined,
+
+    @Inject(AuditService)
+    private readonly auditService:
+      AuditService,
   ) {}
 
   async initiateBankPayment(
@@ -139,7 +147,8 @@ export class PaymentsService {
         }
 
         if (decision === "REJECTED") {
-          return tx.paymentTransaction.update({
+          const rejected =
+            await tx.paymentTransaction.update({
             where: {
               id: payment.id,
             },
@@ -150,7 +159,24 @@ export class PaymentsService {
                 "Bank transfer rejected during verification",
               externalReference: reference,
             },
-          });
+            });
+
+          await this.auditService.createWithTx(
+            tx,
+            {
+              tenantId: payment.tenantId,
+              userId: manager.sub,
+              action: "PAYMENT_REVIEWED",
+              entityType: "PAYMENT_TRANSACTION",
+              entityId: payment.id,
+              metadata: {
+                decision,
+                outcome: "FAILED",
+              },
+            },
+          );
+
+          return rejected;
         }
 
         if (!payment.order) {
@@ -166,7 +192,8 @@ export class PaymentsService {
           );
 
         if (activeReservations.length === 0) {
-          return tx.paymentTransaction.update({
+          const reviewRequired =
+            await tx.paymentTransaction.update({
             where: {
               id: payment.id,
             },
@@ -176,7 +203,24 @@ export class PaymentsService {
               failureReason:
                 "Bank payment approved after inventory reservation expired",
             },
-          });
+            });
+
+          await this.auditService.createWithTx(
+            tx,
+            {
+              tenantId: payment.tenantId,
+              userId: manager.sub,
+              action: "PAYMENT_REVIEWED",
+              entityType: "PAYMENT_TRANSACTION",
+              entityId: payment.id,
+              metadata: {
+                decision,
+                outcome: "REQUIRES_REVIEW",
+              },
+            },
+          );
+
+          return reviewRequired;
         }
 
         await this.ordersService.confirmPaidOrderWithTx(
@@ -185,7 +229,8 @@ export class PaymentsService {
           manager.sub,
         );
 
-        return tx.paymentTransaction.update({
+        const approved =
+          await tx.paymentTransaction.update({
           where: {
             id: payment.id,
           },
@@ -194,7 +239,24 @@ export class PaymentsService {
             externalReference: reference,
             completedAt: new Date(),
           },
-        });
+          });
+
+        await this.auditService.createWithTx(
+          tx,
+          {
+            tenantId: payment.tenantId,
+            userId: manager.sub,
+            action: "PAYMENT_REVIEWED",
+            entityType: "PAYMENT_TRANSACTION",
+            entityId: payment.id,
+            metadata: {
+              decision,
+              outcome: "SUCCEEDED",
+            },
+          },
+        );
+
+        return approved;
       },
     );
   }
@@ -203,6 +265,12 @@ export class PaymentsService {
     orderId: string,
     user: AuthenticatedUser,
   ) {
+    if (!this.cardService) {
+      throw new ServiceUnavailableException(
+        "Card payments are not configured",
+      );
+    }
+
     const order =
       await this.prisma.order.findFirst({
         where: {

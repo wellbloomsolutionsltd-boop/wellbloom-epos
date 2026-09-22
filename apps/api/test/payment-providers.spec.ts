@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
+import {
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { PaymentsService } from "../src/payments/payments.service";
 
 function createHarness(options: {
@@ -45,6 +48,7 @@ function createHarness(options: {
     creates: 0,
     updates: 0,
     finalizations: 0,
+    auditLogs: [] as any[],
   };
 
   const paymentResult = () => ({
@@ -155,6 +159,15 @@ function createHarness(options: {
   };
   const posCheckouts = {};
   const mpesa = {};
+  const auditService = {
+    createWithTx: async (
+      _tx: any,
+      input: any,
+    ) => {
+      state.auditLogs.push(input);
+      return input;
+    },
+  };
 
   const service = new PaymentsService(
     prisma,
@@ -162,6 +175,7 @@ function createHarness(options: {
     orders as any,
     posCheckouts as any,
     card as any,
+    auditService as any,
   );
 
   return { service, state, tx };
@@ -174,6 +188,25 @@ const user = {
   role: "MANAGER",
   email: "manager@example.com",
 };
+
+test("unconfigured card provider is unavailable without blocking bootstrap", async () => {
+  const service = new PaymentsService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    undefined,
+    {} as any,
+  );
+
+  await assert.rejects(
+    () => service.initiateOrderCard(
+      "order-1",
+      user,
+    ),
+    ServiceUnavailableException,
+  );
+});
 
 test("successful card initiation stays PENDING", async () => {
   const harness = createHarness({ paymentStatus: "INITIATED" });
@@ -259,6 +292,14 @@ test("manager approval finalizes bank payment", async () => {
   );
   assert.equal(result.status, "SUCCEEDED");
   assert.equal(harness.state.finalizations, 1);
+  assert.equal(
+    harness.state.auditLogs[0].action,
+    "PAYMENT_REVIEWED",
+  );
+  assert.equal(
+    harness.state.auditLogs[0].metadata.outcome,
+    "SUCCEEDED",
+  );
 });
 
 test("bank rejection fails payment", async () => {
