@@ -16,6 +16,9 @@ import { LoginDto } from "./dto/login.dto";
 import {
   RefreshTokenDto,
 } from "./dto/refresh-token.dto";
+import {
+  Throttle,
+} from "@nestjs/throttler";
 
 @Controller("auth")
 export class AuthController {
@@ -24,6 +27,12 @@ export class AuthController {
     private readonly authService: AuthService,
   ) {}
 
+  @Throttle({
+    default: {
+      limit: 8,
+      ttl: 60_000,
+    },
+  })
   @Post("login")
   login(
     @Body() dto: LoginDto,
