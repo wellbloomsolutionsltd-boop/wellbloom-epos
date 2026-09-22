@@ -4,6 +4,7 @@ import {
   NestModule,
 } from "@nestjs/common";
 import {
+  APP_FILTER,
   APP_GUARD,
 } from "@nestjs/core";
 import {
@@ -52,6 +53,9 @@ import {
 import {
   RequestIdMiddleware,
 } from "./common/middleware/request-id.middleware";
+import {
+  AllExceptionsFilter,
+} from "./common/filters/all-exceptions.filter";
 
 @Module({
   controllers: [AppController],
@@ -83,6 +87,10 @@ import {
     PricingModule,
   ],
   providers: [
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
