@@ -56,6 +56,9 @@ import {
 import {
   AllExceptionsFilter,
 } from "./common/filters/all-exceptions.filter";
+import {
+  HealthModule,
+} from "./health/health.module";
 
 @Module({
   controllers: [AppController],
@@ -85,6 +88,7 @@ import {
     PaymentsModule,
     PosCheckoutsModule,
     PricingModule,
+    HealthModule,
   ],
   providers: [
     {
