@@ -148,18 +148,18 @@ export class PaymentsService {
 
         if (decision === "REJECTED") {
           const rejected =
-            await tx.paymentTransaction.update({
-            where: {
-              id: payment.id,
-            },
-            data: {
-              status: "FAILED",
-              failedAt: new Date(),
-              failureReason:
-                "Bank transfer rejected during verification",
-              externalReference: reference,
-            },
-            });
+            await this.transitionPendingBankPayment(
+              tx,
+              payment.id,
+              payment.tenantId,
+              {
+                status: "FAILED",
+                failedAt: new Date(),
+                failureReason:
+                  "Bank transfer rejected during verification",
+                externalReference: reference,
+              },
+            );
 
           await this.auditService.createWithTx(
             tx,
@@ -193,17 +193,17 @@ export class PaymentsService {
 
         if (activeReservations.length === 0) {
           const reviewRequired =
-            await tx.paymentTransaction.update({
-            where: {
-              id: payment.id,
-            },
-            data: {
-              status: "REQUIRES_REVIEW",
-              externalReference: reference,
-              failureReason:
-                "Bank payment approved after inventory reservation expired",
-            },
-            });
+            await this.transitionPendingBankPayment(
+              tx,
+              payment.id,
+              payment.tenantId,
+              {
+                status: "REQUIRES_REVIEW",
+                externalReference: reference,
+                failureReason:
+                  "Bank payment approved after inventory reservation expired",
+              },
+            );
 
           await this.auditService.createWithTx(
             tx,
@@ -230,16 +230,16 @@ export class PaymentsService {
         );
 
         const approved =
-          await tx.paymentTransaction.update({
-          where: {
-            id: payment.id,
-          },
-          data: {
-            status: "SUCCEEDED",
-            externalReference: reference,
-            completedAt: new Date(),
-          },
-          });
+          await this.transitionPendingBankPayment(
+            tx,
+            payment.id,
+            payment.tenantId,
+            {
+              status: "SUCCEEDED",
+              externalReference: reference,
+              completedAt: new Date(),
+            },
+          );
 
         await this.auditService.createWithTx(
           tx,
@@ -259,6 +259,45 @@ export class PaymentsService {
         return approved;
       },
     );
+  }
+
+  private async transitionPendingBankPayment(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    tenantId: string,
+    data: Prisma.PaymentTransactionUpdateManyMutationInput,
+  ) {
+    const transitioned =
+      await tx.paymentTransaction.updateMany({
+        where: {
+          id: paymentId,
+          tenantId,
+          provider: "BANK",
+          status: "PENDING",
+        },
+        data,
+      });
+
+    if (transitioned.count !== 1) {
+      throw new BadRequestException(
+        "Payment was already reviewed",
+      );
+    }
+
+    const payment =
+      await tx.paymentTransaction.findUnique({
+        where: {
+          id: paymentId,
+        },
+      });
+
+    if (!payment) {
+      throw new NotFoundException(
+        "Payment not found after review",
+      );
+    }
+
+    return payment;
   }
 
   async initiateOrderCard(

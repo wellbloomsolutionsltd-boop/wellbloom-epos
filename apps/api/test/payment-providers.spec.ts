@@ -97,7 +97,20 @@ function createHarness(options: {
         Object.assign(state.payment, data);
         return paymentResult();
       },
-      updateMany: async ({ data }: any) => {
+      updateMany: async ({ where, data }: any) => {
+        if (
+          (where.id &&
+            where.id !== state.payment.id) ||
+          (where.tenantId &&
+            where.tenantId !== state.payment.tenantId) ||
+          (where.provider &&
+            where.provider !== state.payment.provider) ||
+          (where.status &&
+            where.status !== state.payment.status)
+        ) {
+          return { count: 0 };
+        }
+
         state.updates++;
         Object.assign(state.payment, data);
         return { count: 1 };
@@ -355,6 +368,41 @@ test("duplicate bank approval cannot finalize twice", async () => {
     /Pending bank payment not found/,
   );
   assert.equal(harness.state.finalizations, 1);
+});
+
+test("concurrent bank reviews allow only one PENDING transition", async () => {
+  const harness = createHarness({ provider: "BANK" });
+
+  const results = await Promise.allSettled([
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "REJECTED",
+      "BANK-REF-RACE-1",
+      user,
+    ),
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "REJECTED",
+      "BANK-REF-RACE-2",
+      user,
+    ),
+  ]);
+
+  assert.equal(
+    results.filter(
+      (result) => result.status === "fulfilled",
+    ).length,
+    1,
+  );
+  assert.equal(
+    results.filter(
+      (result) => result.status === "rejected",
+    ).length,
+    1,
+  );
+  assert.equal(harness.state.payment.status, "FAILED");
+  assert.equal(harness.state.updates, 1);
+  assert.equal(harness.state.auditLogs.length, 1);
 });
 
 test("frontend amount input is not used for bank transaction amount", async () => {
