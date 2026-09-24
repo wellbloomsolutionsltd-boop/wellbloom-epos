@@ -14,15 +14,21 @@ export type JwtEnvironmentConfig = {
 };
 
 const requiredJwtEnvironmentVariables = [
-  "JWT_ACCESS_SECRET",
   "JWT_REFRESH_SECRET",
 ] as const;
 
 export function getJwtEnvironmentConfig(): JwtEnvironmentConfig {
-  const missing =
+  const accessSecret =
+    process.env.JWT_ACCESS_SECRET?.trim() ??
+    process.env.JWT_SECRET?.trim();
+  const missing: string[] =
     requiredJwtEnvironmentVariables.filter(
       (name) => !process.env[name]?.trim(),
     );
+
+  if (!accessSecret) {
+    missing.unshift("JWT_ACCESS_SECRET");
+  }
 
   if (missing.length > 0) {
     throw new Error(
@@ -31,8 +37,8 @@ export function getJwtEnvironmentConfig(): JwtEnvironmentConfig {
   }
 
   if (
-    process.env.JWT_ACCESS_SECRET ===
-    process.env.JWT_REFRESH_SECRET
+    accessSecret ===
+    process.env.JWT_REFRESH_SECRET?.trim()
   ) {
     throw new Error(
       "JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different",
@@ -40,7 +46,7 @@ export function getJwtEnvironmentConfig(): JwtEnvironmentConfig {
   }
 
   return {
-    accessSecret: process.env.JWT_ACCESS_SECRET!,
+    accessSecret: accessSecret!,
     accessExpiresIn: (
       process.env.JWT_EXPIRES_IN ?? "1d"
     ) as JwtExpiry,

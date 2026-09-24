@@ -23,6 +23,9 @@ import { InitiateBankPaymentDto } from "./dto/initiate-bank-payment.dto";
 import { InitiateCardDto } from "./dto/initiate-card.dto";
 import { ReviewManualPaymentDto } from "./dto/review-manual-payment.dto";
 import { PaymentsService } from "./payments.service";
+import {
+  SkipThrottle,
+} from "@nestjs/throttler";
 
 @Controller("payments")
 export class PaymentsController {
@@ -108,6 +111,7 @@ export class PaymentsController {
   }
 
   @Post("mpesa/callback")
+  @SkipThrottle()
   mpesaCallback(@Body() body: unknown) {
     return this.paymentsService.handleMpesaCallback(body);
   }

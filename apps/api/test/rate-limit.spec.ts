@@ -10,6 +10,9 @@ import { AppModule } from "../src/app.module";
 import {
   AuthController,
 } from "../src/auth/auth.controller";
+import {
+  PaymentsController,
+} from "../src/payments/payments.controller";
 
 test("global throttling is configured for 120 requests per minute", () => {
   const imports = Reflect.getMetadata(
@@ -78,5 +81,32 @@ test("login is limited to eight requests per minute", () => {
       AuthController.prototype.login,
     ),
     60_000,
+  );
+});
+
+test("refresh is limited to twelve requests per minute", () => {
+  assert.equal(
+    Reflect.getMetadata(
+      "THROTTLER:LIMITdefault",
+      AuthController.prototype.refresh,
+    ),
+    12,
+  );
+  assert.equal(
+    Reflect.getMetadata(
+      "THROTTLER:TTLdefault",
+      AuthController.prototype.refresh,
+    ),
+    60_000,
+  );
+});
+
+test("M-Pesa callbacks are exempt from interactive-user throttling", () => {
+  assert.equal(
+    Reflect.getMetadata(
+      "THROTTLER:SKIPdefault",
+      PaymentsController.prototype.mpesaCallback,
+    ),
+    true,
   );
 });

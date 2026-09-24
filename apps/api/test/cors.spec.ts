@@ -176,3 +176,39 @@ test("production configuration requires CORS_ORIGIN", () => {
     /CORS_ORIGIN is required in production/,
   );
 });
+
+test("local defaults allow localhost and loopback frontend origins", () => {
+  const options = createCorsOptions({
+    NODE_ENV: "development",
+  });
+  const origin = options.origin;
+
+  assert.equal(typeof origin, "function");
+
+  for (const allowed of [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ]) {
+    let accepted = false;
+
+    (origin as Function)(
+      allowed,
+      (error: Error | null, result: boolean) => {
+        assert.equal(error, null);
+        accepted = result;
+      },
+    );
+
+    assert.equal(accepted, true);
+  }
+});
+
+test("wildcard origins are rejected", () => {
+  assert.throws(
+    () => createCorsOptions({
+      NODE_ENV: "development",
+      CORS_ORIGIN: "*",
+    }),
+    /Wildcard CORS origins are not allowed/,
+  );
+});

@@ -3,9 +3,14 @@ import type {
   CustomOrigin,
 } from "@nestjs/common/interfaces/external/cors-options.interface";
 
-export function createCorsOptions(
+export const LOCAL_CORS_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+] as const;
+
+export function resolveCorsOrigins(
   environment: NodeJS.ProcessEnv = process.env,
-): CorsOptions {
+) {
   const isProduction =
     environment.NODE_ENV ===
     "production";
@@ -31,9 +36,51 @@ export function createCorsOptions(
               origin.trim(),
           )
           .filter(Boolean)
-      : [
-          "http://localhost:3000",
-        ];
+      : [...LOCAL_CORS_ORIGINS];
+
+  if (allowedOrigins.length === 0) {
+    throw new Error(
+      "CORS_ORIGIN must contain at least one origin",
+    );
+  }
+
+  for (const origin of allowedOrigins) {
+    if (origin === "*") {
+      throw new Error(
+        "Wildcard CORS origins are not allowed",
+      );
+    }
+
+    let parsedOrigin: URL;
+
+    try {
+      parsedOrigin = new URL(origin);
+    } catch {
+      throw new Error(
+        `Invalid CORS origin: ${origin}`,
+      );
+    }
+
+    if (
+      !["http:", "https:"].includes(
+        parsedOrigin.protocol,
+      ) ||
+      parsedOrigin.origin !== origin
+    ) {
+      throw new Error(
+        `Invalid CORS origin: ${origin}`,
+      );
+    }
+  }
+
+  return allowedOrigins;
+}
+
+export function createCorsOptions(
+  environment: NodeJS.ProcessEnv = process.env,
+): CorsOptions {
+  const allowedOrigins =
+    resolveCorsOrigins(environment);
 
   const validateOrigin: CustomOrigin = (
     origin,
