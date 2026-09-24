@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Param,
   Patch,
   Post,
@@ -20,7 +21,10 @@ import { UpdateCustomerDto } from "./dto/update-customer.dto";
 @UseGuards(JwtAuthGuard)
 @Controller("customers")
 export class CustomersController {
-  constructor(private readonly customersService: CustomersService) {}
+  constructor(
+    @Inject(CustomersService)
+    private readonly customersService: CustomersService,
+  ) {}
 
   @Post()
   create(

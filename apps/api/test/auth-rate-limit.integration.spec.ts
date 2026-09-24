@@ -4,6 +4,8 @@ import type {
   AddressInfo,
 } from "node:net";
 import {
+  Controller,
+  Get,
   Module,
 } from "@nestjs/common";
 import {
@@ -43,6 +45,24 @@ const authService = {
   logoutAll: async () => ({ success: true }),
 };
 
+class RateLimitProbeController {
+  check() {
+    return { status: "ok" };
+  }
+}
+
+Get()(
+  RateLimitProbeController.prototype,
+  "check",
+  Object.getOwnPropertyDescriptor(
+    RateLimitProbeController.prototype,
+    "check",
+  )!,
+);
+Controller("rate-limit-probe")(
+  RateLimitProbeController,
+);
+
 @Module({
   imports: [
     JwtModule.register({
@@ -58,7 +78,10 @@ const authService = {
       ],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [
+    AuthController,
+    RateLimitProbeController,
+  ],
   providers: [
     {
       provide: AuthService,
@@ -73,7 +96,7 @@ const authService = {
 })
 class AuthRateLimitModule {}
 
-test("normal login succeeds before the auth rate limit is enforced", async () => {
+async function createRateLimitApp() {
   const app = await NestFactory.create(
     AuthRateLimitModule,
     {
@@ -90,8 +113,17 @@ test("normal login succeeds before the auth rate limit is enforced", async () =>
   await app.listen(0, "127.0.0.1");
   const address = app.getHttpServer()
     .address() as AddressInfo;
-  const url =
-    `http://127.0.0.1:${address.port}/auth/login`;
+
+  return {
+    app,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+  };
+}
+
+test("normal login succeeds before the auth rate limit is enforced", async () => {
+  const { app, baseUrl } =
+    await createRateLimitApp();
+  const url = `${baseUrl}/auth/login`;
 
   try {
     for (let attempt = 1; attempt <= 8; attempt++) {
@@ -121,6 +153,26 @@ test("normal login succeeds before the auth rate limit is enforced", async () =>
         password: "correct-password",
       }),
     });
+
+    assert.equal(limited.status, 429);
+  } finally {
+    await app.close();
+  }
+});
+
+test("general rate limit activates after 120 requests", async () => {
+  const { app, baseUrl } =
+    await createRateLimitApp();
+  const url = `${baseUrl}/rate-limit-probe`;
+
+  try {
+    for (let attempt = 1; attempt <= 120; attempt++) {
+      const response = await fetch(url);
+
+      assert.equal(response.status, 200);
+    }
+
+    const limited = await fetch(url);
 
     assert.equal(limited.status, 429);
   } finally {

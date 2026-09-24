@@ -26,5 +26,13 @@ pg_dump `
     $Database `
     -f $file
 
+if ($LASTEXITCODE -ne 0) {
+    if (Test-Path -LiteralPath $file) {
+        Remove-Item -LiteralPath $file
+    }
+
+    throw "Database backup failed with exit code $LASTEXITCODE"
+}
+
 Write-Host `
     "Backup created: $file"

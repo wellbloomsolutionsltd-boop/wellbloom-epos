@@ -30,7 +30,7 @@ test("valid local environment resolves safe defaults", () => {
   );
 });
 
-test("missing required environment blocks startup", () => {
+test("missing database URL blocks startup", () => {
   assert.throws(
     () => validateEnvironment({
       ...validEnvironment,
@@ -38,13 +38,25 @@ test("missing required environment blocks startup", () => {
     }),
     /DATABASE_URL/,
   );
+});
 
+test("missing JWT access secret blocks startup", () => {
   assert.throws(
     () => validateEnvironment({
       ...validEnvironment,
       JWT_SECRET: "",
     }),
     /JWT_ACCESS_SECRET \(or JWT_SECRET\)/,
+  );
+});
+
+test("missing JWT refresh secret blocks startup", () => {
+  assert.throws(
+    () => validateEnvironment({
+      ...validEnvironment,
+      JWT_REFRESH_SECRET: "",
+    }),
+    /JWT_REFRESH_SECRET/,
   );
 });
 

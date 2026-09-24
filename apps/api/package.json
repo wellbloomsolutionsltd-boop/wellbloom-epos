@@ -5,6 +5,7 @@
     "build": "nest build",
     "start": "tsx src/main.ts",
     "start:dev": "tsx watch src/main.ts",
+    "start:prod": "tsx dist/main.js",
     "test": "tsx --tsconfig tsconfig.json --test test/*.spec.ts"
   },
   "dependencies": {

@@ -6,7 +6,9 @@ import type {
 import {
   Body,
   Controller,
+  MiddlewareConsumer,
   Module,
+  NestModule,
   Post,
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -17,6 +19,9 @@ import {
 import {
   configureApiRuntime,
 } from "../src/api-runtime";
+import {
+  RequestIdMiddleware,
+} from "../src/common/middleware/request-id.middleware";
 
 class RuntimeProbeDto {
   email!: string;
@@ -65,7 +70,13 @@ Post()(
 @Module({
   controllers: [RuntimeProbeController],
 })
-class RuntimeProbeModule {}
+class RuntimeProbeModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(RequestIdMiddleware)
+      .forRoutes("*");
+  }
+}
 
 async function withRuntimeApp(
   callback: (baseUrl: string) => Promise<void>,
@@ -112,6 +123,10 @@ test("runtime validation rejects extra and malformed DTO fields", async () => {
     );
 
     assert.equal(valid.status, 201);
+    assert.match(
+      valid.headers.get("x-request-id") ?? "",
+      /^[0-9a-f-]{36}$/i,
+    );
 
     const extra = await fetch(
       `${baseUrl}/runtime-probe`,
