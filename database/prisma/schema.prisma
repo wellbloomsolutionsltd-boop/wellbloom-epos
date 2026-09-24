@@ -861,10 +861,10 @@ model InventoryReservation {
   product   Product @relation(fields: [productId], references: [id])
 
   orderId String?
-  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   posCheckoutId String?
-  posCheckout   PosCheckout? @relation(fields: [posCheckoutId], references: [id], onDelete: Cascade)
+  posCheckout   PosCheckout? @relation(fields: [posCheckoutId], references: [id], onDelete: Restrict)
 
   quantity   Decimal           @db.Decimal(12, 3)
   status     ReservationStatus @default(ACTIVE)

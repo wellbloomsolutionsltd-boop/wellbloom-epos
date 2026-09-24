@@ -13,6 +13,10 @@ import {
   PrismaService,
 } from "../prisma/prisma.service";
 import { PricingService } from "../pricing/pricing.service";
+import {
+  assertBranchAccess,
+  getBranchScope,
+} from "../common/authorization/branch-access";
 
 import {
   AuthenticatedUser,
@@ -88,6 +92,12 @@ export class OrdersService {
             return existingOrder;
           }
         }
+
+        await assertBranchAccess(
+          tx,
+          user,
+          dto.branchId,
+        );
 
         const branch =
           await tx.branch.findFirst({
@@ -342,11 +352,13 @@ export class OrdersService {
     orderId: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const order =
       await this.prisma.order.findFirst({
         where: {
           id: orderId,
           tenantId: user.tenantId,
+          branchId,
         },
         include: {
           items: {
@@ -369,6 +381,7 @@ export class OrdersService {
   async confirmPaidOrderWithTx(
     tx: Prisma.TransactionClient,
     orderId: string,
+    tenantId: string,
     actorUserId?: string,
   ) {
     const order =
@@ -376,6 +389,7 @@ export class OrdersService {
         where: {
           id:
             orderId,
+          tenantId,
           status:
             "AWAITING_PAYMENT",
         },
@@ -410,6 +424,7 @@ export class OrdersService {
         where: {
           id:
             order.id,
+          tenantId,
           status:
             "AWAITING_PAYMENT",
         },
@@ -549,6 +564,7 @@ export class OrdersService {
   ) {
     return this.prisma.$transaction(
       async (tx) => {
+        const branchId = getBranchScope(user);
         const order =
           await tx.order.findFirst({
             where: {
@@ -556,6 +572,7 @@ export class OrdersService {
                 orderId,
               tenantId:
                 user.tenantId,
+              branchId,
               status: {
                 in: [
                   "PENDING",

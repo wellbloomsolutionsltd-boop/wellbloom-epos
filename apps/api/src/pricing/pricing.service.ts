@@ -10,6 +10,10 @@ import {
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { AuthenticatedUser } from "../auth/jwt-auth.guard";
+import {
+  assertBranchAccess,
+} from "../common/authorization/branch-access";
 import { SetProductPriceDto } from "./dto/set-product-price.dto";
 
 @Injectable()
@@ -123,9 +127,9 @@ export class PricingService {
 
   async setProductPrice(
     dto: SetProductPriceDto,
-    tenantId: string,
-    actorUserId?: string,
+    user: AuthenticatedUser,
   ) {
+    const tenantId = user.tenantId;
     const product = await this.prisma.product.findFirst({
       where: {
         id: dto.productId,
@@ -138,16 +142,11 @@ export class PricingService {
     }
 
     if (dto.branchId) {
-      const branch = await this.prisma.branch.findFirst({
-        where: {
-          id: dto.branchId,
-          tenantId,
-        },
-      });
-
-      if (!branch) {
-        throw new NotFoundException("Branch not found");
-      }
+      await assertBranchAccess(
+        this.prisma,
+        user,
+        dto.branchId,
+      );
     }
 
     if (
@@ -179,7 +178,7 @@ export class PricingService {
 
       await this.auditService.createWithTx(tx, {
         tenantId,
-        userId: actorUserId,
+        userId: user.sub,
         action: "PRODUCT_PRICE_CHANGED",
         entityType: "PRODUCT_PRICE",
         entityId: price.id,

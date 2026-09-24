@@ -13,6 +13,9 @@ import {
   PrismaService,
 } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import {
+  getBranchScope,
+} from "../common/authorization/branch-access";
 
 import {
   AuthenticatedUser,
@@ -549,15 +552,16 @@ export class ReturnsService {
   async findAll(
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     return this.prisma.return.findMany({
       where: {
         tenantId:
           user.tenantId,
 
-        ...(user.branchId
+        ...(branchId
           ? {
               branchId:
-                user.branchId,
+                branchId,
             }
           : {}),
       },

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -9,6 +10,9 @@ import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { PricingService } from "../pricing/pricing.service";
 import { AuditService } from "../audit/audit.service";
+import {
+  getBranchScope,
+} from "../common/authorization/branch-access";
 import { CreateSaleDto } from "./dto/create-sale.dto";
 
 @Injectable()
@@ -416,6 +420,30 @@ export class SalesService {
           );
         }
 
+        const voidedAt = new Date();
+        const claimed =
+          await tx.sale.updateMany({
+            where: {
+              id: sale.id,
+              tenantId: manager.tenantId,
+              status: "COMPLETED",
+              voidedAt: null,
+              voidedById: null,
+            },
+            data: {
+              status: "VOIDED",
+              voidedById: manager.sub,
+              voidReason: reason,
+              voidedAt,
+            },
+          });
+
+        if (claimed.count !== 1) {
+          throw new ConflictException(
+            "Sale has already been voided or otherwise transitioned",
+          );
+        }
+
         for (const item of sale.items) {
           const inventoryBefore =
             await tx.inventory.findUnique({
@@ -578,26 +606,11 @@ export class SalesService {
         }
 
         const voidedSale =
-          await tx.sale.update({
+          await tx.sale.findUnique({
           where: {
             id:
               sale.id,
           },
-
-          data: {
-            status:
-              "VOIDED",
-
-            voidedById:
-              manager.sub,
-
-            voidReason:
-              reason,
-
-            voidedAt:
-              new Date(),
-          },
-
           include: {
             branch: true,
 
@@ -629,6 +642,12 @@ export class SalesService {
           },
           });
 
+        if (!voidedSale) {
+          throw new NotFoundException(
+            "Voided sale not found",
+          );
+        }
+
         await this.auditService.createWithTx(
           tx,
           {
@@ -650,9 +669,11 @@ export class SalesService {
   }
 
   async findAll(user: AuthenticatedUser) {
+    const branchId = getBranchScope(user);
     return this.prisma.sale.findMany({
       where: {
         tenantId: user.tenantId,
+        branchId,
       },
       include: {
         branch: true,
@@ -696,9 +717,11 @@ export class SalesService {
       return [];
     }
 
+    const branchId = getBranchScope(user);
     return this.prisma.sale.findMany({
       where: {
         tenantId: user.tenantId,
+        branchId,
         OR: [
           {
             saleNumber: {
@@ -750,10 +773,12 @@ export class SalesService {
   }
 
   async findOne(id: string, user: AuthenticatedUser) {
+    const branchId = getBranchScope(user);
     const sale = await this.prisma.sale.findUnique({
       where: {
         id,
         tenantId: user.tenantId,
+        branchId,
       },
       include: {
         branch: true,

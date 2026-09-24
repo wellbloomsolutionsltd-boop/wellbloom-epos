@@ -7,6 +7,10 @@ import {
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { PricingService } from "../pricing/pricing.service";
+import {
+  getBranchScope,
+} from "../common/authorization/branch-access";
 import { CreatePosCheckoutDto } from "./dto/create-pos-checkout.dto";
 
 @Injectable()
@@ -14,19 +18,21 @@ export class PosCheckoutsService {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(PricingService)
+    private readonly pricingService: PricingService,
   ) {}
 
   async getStatus(
     id: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const checkout =
       await this.prisma.posCheckout.findFirst({
         where: {
           id,
           tenantId: user.tenantId,
-          branchId:
-            user.branchId ?? undefined,
+          branchId,
         },
         include: {
           sale: {
@@ -164,7 +170,15 @@ export class PosCheckoutsService {
           );
         }
 
-        const unitPrice = product.sellingPrice;
+        const resolvedPrice =
+          await this.pricingService.resolveProductPrice({
+            tenantId: user.tenantId,
+            productId: product.id,
+            branchId,
+            channel: "POS",
+            tx,
+          });
+        const unitPrice = resolvedPrice.price;
         const lineTotal = unitPrice.mul(quantity);
 
         subtotal = subtotal.add(lineTotal);
@@ -231,12 +245,14 @@ export class PosCheckoutsService {
     tx: Prisma.TransactionClient,
     posCheckoutId: string,
     paymentId: string,
+    tenantId: string,
   ) {
     const now = new Date();
     const checkout =
-      await tx.posCheckout.findUnique({
+      await tx.posCheckout.findFirst({
         where: {
           id: posCheckoutId,
+          tenantId,
         },
         include: {
           items: true,
@@ -275,9 +291,10 @@ export class PosCheckoutsService {
     }
 
     const payment =
-      await tx.paymentTransaction.findUnique({
+      await tx.paymentTransaction.findFirst({
         where: {
           id: paymentId,
+          tenantId,
         },
       });
 

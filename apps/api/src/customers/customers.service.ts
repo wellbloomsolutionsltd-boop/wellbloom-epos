@@ -7,6 +7,9 @@ import { Prisma } from "@prisma/client";
 
 import { AuthenticatedUser } from "../auth/jwt-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  getBranchScope,
+} from "../common/authorization/branch-access";
 import { CreateCustomerDto } from "./dto/create-customer.dto";
 import { UpdateCustomerDto } from "./dto/update-customer.dto";
 
@@ -92,6 +95,7 @@ export class CustomersService {
   }
 
   async findOne(id: string, user: AuthenticatedUser) {
+    const branchId = getBranchScope(user);
     const customer = await this.prisma.customer.findFirst({
       where: {
         id,
@@ -99,6 +103,9 @@ export class CustomersService {
       },
       include: {
         sales: {
+          where: {
+            branchId,
+          },
           include: {
             branch: true,
             payments: true,

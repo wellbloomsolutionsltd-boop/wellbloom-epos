@@ -31,8 +31,7 @@ export class PricingController {
   ) {
     return this.pricingService.setProductPrice(
       dto,
-      user.tenantId,
-      user.sub,
+      user,
     );
   }
 }

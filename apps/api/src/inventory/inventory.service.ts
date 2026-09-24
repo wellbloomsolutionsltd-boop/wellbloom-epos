@@ -16,6 +16,10 @@ import {
 import {
   AuthenticatedUser,
 } from "../auth/jwt-auth.guard";
+import {
+  assertBranchAccess,
+  getBranchScope,
+} from "../common/authorization/branch-access";
 
 @Injectable()
 export class InventoryService {
@@ -63,13 +67,24 @@ export class InventoryService {
   async getProductAvailability(
     productId: string,
     branchId: string,
+    user: AuthenticatedUser,
   ) {
+    await assertBranchAccess(
+      this.prisma,
+      user,
+      branchId,
+    );
+
     const inventory =
-      await this.prisma.inventory.findUnique({
+      await this.prisma.inventory.findFirst({
         where: {
-          branchId_productId: {
-            branchId,
-            productId,
+          branchId,
+          productId,
+          product: {
+            tenantId: user.tenantId,
+          },
+          branch: {
+            tenantId: user.tenantId,
           },
         },
         include: {
@@ -109,6 +124,7 @@ export class InventoryService {
     productId: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const product =
       await this.prisma.product.findFirst({
         where: {
@@ -127,9 +143,9 @@ export class InventoryService {
       where: {
         tenantId: user.tenantId,
         productId,
-        ...(user.branchId
+        ...(branchId
           ? {
-              branchId: user.branchId,
+              branchId,
             }
           : {}),
       },

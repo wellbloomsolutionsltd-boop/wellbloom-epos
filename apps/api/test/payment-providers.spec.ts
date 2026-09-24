@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import {
+  ConflictException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { PaymentsService } from "../src/payments/payments.service";
@@ -11,6 +12,7 @@ function createHarness(options: {
   paymentStatus?: string;
   orderStatus?: string;
   reservationStatus?: string;
+  synchronizeBankReviewReads?: boolean;
   cardCreateFails?: boolean;
   cardVerification?: {
     successful: boolean;
@@ -56,6 +58,14 @@ function createHarness(options: {
     order: state.order,
   });
 
+  let bankReviewReadCount = 0;
+  let releaseBankReviewReads!: () => void;
+  const bankReviewReadsReady = new Promise<void>(
+    (resolve) => {
+      releaseBankReviewReads = resolve;
+    },
+  );
+
   const tx: any = {
     paymentTransaction: {
       findFirst: async ({ where }: any) => {
@@ -80,7 +90,22 @@ function createHarness(options: {
           return null;
         }
 
-        return paymentResult();
+        const result = paymentResult();
+
+        if (
+          options.synchronizeBankReviewReads &&
+          where.provider === "BANK"
+        ) {
+          bankReviewReadCount++;
+
+          if (bankReviewReadCount === 2) {
+            releaseBankReviewReads();
+          }
+
+          await bankReviewReadsReady;
+        }
+
+        return result;
       },
       findUnique: async () => paymentResult(),
       create: async ({ data }: any) => {
@@ -349,7 +374,7 @@ test("cashier role is not an authorization for bank approval", async () => {
   );
 });
 
-test("duplicate bank approval cannot finalize twice", async () => {
+test("second review after approval is rejected as a conflict", async () => {
   const harness = createHarness({ provider: "BANK" });
   await harness.service.reviewBankPayment(
     "payment-1",
@@ -357,7 +382,6 @@ test("duplicate bank approval cannot finalize twice", async () => {
     "BANK-REF-5",
     user,
   );
-  harness.state.payment.status = "SUCCEEDED";
   await assert.rejects(
     harness.service.reviewBankPayment(
       "payment-1",
@@ -365,13 +389,158 @@ test("duplicate bank approval cannot finalize twice", async () => {
       "BANK-REF-5",
       user,
     ),
-    /Pending bank payment not found/,
+    ConflictException,
   );
   assert.equal(harness.state.finalizations, 1);
+  assert.equal(harness.state.auditLogs.length, 1);
 });
 
-test("concurrent bank reviews allow only one PENDING transition", async () => {
+test("second review after rejection is rejected as a conflict", async () => {
   const harness = createHarness({ provider: "BANK" });
+
+  await harness.service.reviewBankPayment(
+    "payment-1",
+    "REJECTED",
+    "BANK-REF-REJECTED",
+    user,
+  );
+
+  await assert.rejects(
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "APPROVED",
+      "BANK-REF-TOO-LATE",
+      user,
+    ),
+    ConflictException,
+  );
+  assert.equal(harness.state.payment.status, "FAILED");
+  assert.equal(harness.state.finalizations, 0);
+  assert.equal(harness.state.auditLogs.length, 1);
+});
+
+test("two concurrent bank approvals produce one transition and one set of side effects", async () => {
+  const harness = createHarness({
+    provider: "BANK",
+    synchronizeBankReviewReads: true,
+  });
+
+  const results = await Promise.allSettled([
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "APPROVED",
+      "BANK-REF-APPROVE-1",
+      user,
+    ),
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "APPROVED",
+      "BANK-REF-APPROVE-2",
+      user,
+    ),
+  ]);
+
+  assert.equal(
+    results.filter(
+      (result) => result.status === "fulfilled",
+    ).length,
+    1,
+  );
+  assert.equal(
+    results.filter(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof ConflictException,
+    ).length,
+    1,
+  );
+  assert.equal(harness.state.payment.status, "SUCCEEDED");
+  assert.equal(harness.state.updates, 1);
+  assert.equal(harness.state.finalizations, 1);
+  assert.equal(harness.state.auditLogs.length, 1);
+  assert.deepEqual(
+    harness.state.auditLogs[0].metadata,
+    {
+      decision: "APPROVED",
+      outcome: "SUCCEEDED",
+    },
+  );
+});
+
+test("concurrent bank approval and rejection allow only one valid outcome", async () => {
+  const harness = createHarness({
+    provider: "BANK",
+    synchronizeBankReviewReads: true,
+  });
+
+  const results = await Promise.allSettled([
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "APPROVED",
+      "BANK-REF-MIXED-APPROVE",
+      user,
+    ),
+    harness.service.reviewBankPayment(
+      "payment-1",
+      "REJECTED",
+      "BANK-REF-MIXED-REJECT",
+      user,
+    ),
+  ]);
+
+  const fulfilled = results.find(
+    (result) => result.status === "fulfilled",
+  );
+
+  assert.ok(fulfilled);
+  assert.equal(
+    results.filter(
+      (result) => result.status === "fulfilled",
+    ).length,
+    1,
+  );
+  assert.equal(
+    results.filter(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof ConflictException,
+    ).length,
+    1,
+  );
+  assert.equal(harness.state.updates, 1);
+  assert.equal(harness.state.auditLogs.length, 1);
+  assert.equal(
+    harness.state.payment.status,
+    fulfilled.value.status,
+  );
+
+  if (fulfilled.value.status === "SUCCEEDED") {
+    assert.equal(harness.state.finalizations, 1);
+    assert.deepEqual(
+      harness.state.auditLogs[0].metadata,
+      {
+        decision: "APPROVED",
+        outcome: "SUCCEEDED",
+      },
+    );
+  } else {
+    assert.equal(fulfilled.value.status, "FAILED");
+    assert.equal(harness.state.finalizations, 0);
+    assert.deepEqual(
+      harness.state.auditLogs[0].metadata,
+      {
+        decision: "REJECTED",
+        outcome: "FAILED",
+      },
+    );
+  }
+});
+
+test("concurrent bank rejections allow only one PENDING transition", async () => {
+  const harness = createHarness({
+    provider: "BANK",
+    synchronizeBankReviewReads: true,
+  });
 
   const results = await Promise.allSettled([
     harness.service.reviewBankPayment(
@@ -396,7 +565,9 @@ test("concurrent bank reviews allow only one PENDING transition", async () => {
   );
   assert.equal(
     results.filter(
-      (result) => result.status === "rejected",
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof ConflictException,
     ).length,
     1,
   );
@@ -424,7 +595,7 @@ test("cross-tenant bank payment lookup is blocked", async () => {
       undefined,
       { ...user, tenantId: "other-tenant" },
     ),
-    /Pending bank payment not found/,
+    /Bank payment not found/,
   );
 });
 

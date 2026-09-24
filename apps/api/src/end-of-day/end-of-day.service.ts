@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -273,8 +274,9 @@ export class EndOfDayService {
       );
     }
 
-    return this.prisma.$transaction(
-      async (tx) => {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
         const openShiftCount =
           await tx.shift.count({
             where: {
@@ -317,56 +319,14 @@ export class EndOfDayService {
           });
 
         if (existing?.status === "CLOSED") {
-          throw new BadRequestException(
+          throw new ConflictException(
             "End of Day has already been closed for this branch",
           );
         }
 
         const closed =
-          await tx.endOfDay.upsert({
-          where: {
-            tenantId_branchId_businessDate: {
-              tenantId:
-                user.tenantId,
-              branchId:
-                user.branchId!,
-              businessDate:
-                summary.businessDate,
-            },
-          },
-          update: {
-            status: "CLOSED",
-            totalSales:
-              summary.grossSales,
-            totalDiscount:
-              summary.totalDiscount,
-            totalReturns:
-              summary.totalReturns,
-            netSales:
-              summary.netSales,
-            cashTotal:
-              summary.cashTotal,
-            mpesaTotal:
-              summary.mpesaTotal,
-            cardTotal:
-              summary.cardTotal,
-            bankTotal:
-              summary.bankTotal,
-            insuranceTotal:
-              summary.insuranceTotal,
-            otherTotal:
-              summary.otherTotal,
-            transactionCount:
-              summary.transactionCount,
-            shiftCount:
-              summary.shiftCount,
-            totalCashVariance:
-              summary.totalCashVariance,
-            closedById: user.sub,
-            closedAt: new Date(),
-            notes: dto.notes,
-          },
-          create: {
+          await tx.endOfDay.create({
+          data: {
             businessDate:
               summary.businessDate,
             tenantId:
@@ -434,8 +394,22 @@ export class EndOfDayService {
         );
 
         return closed;
-      },
-    );
+        },
+      );
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException(
+          "End of Day has already been closed for this branch",
+        );
+      }
+
+      throw error;
+    }
   }
 
   async getHistory(

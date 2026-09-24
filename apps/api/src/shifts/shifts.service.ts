@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -561,7 +562,7 @@ export class ShiftsService {
           lockedShift.status !==
             "OPEN"
         ) {
-          throw new BadRequestException(
+          throw new ConflictException(
             "Shift has already been closed",
           );
         }
@@ -619,6 +620,33 @@ export class ShiftsService {
             expectedCash,
           );
 
+        const closedAt = new Date();
+        const claimed =
+          await tx.shift.updateMany({
+            where: {
+              id: shift.id,
+              tenantId: user.tenantId,
+              branchId: user.branchId!,
+              status: "OPEN",
+            },
+            data: {
+              status: "CLOSED",
+              expectedCash,
+              countedCash,
+              cashDifference,
+              closedAt,
+              notes:
+                dto.notes ??
+                shift.notes,
+            },
+          });
+
+        if (claimed.count !== 1) {
+          throw new ConflictException(
+            "Shift has already been closed",
+          );
+        }
+
         await tx.cashDrawerMovement.create({
           data: {
             tenantId:
@@ -645,29 +673,10 @@ export class ShiftsService {
         });
 
         const closedShift =
-          await tx.shift.update({
+          await tx.shift.findUnique({
           where: {
             id: shift.id,
           },
-
-          data: {
-            status:
-              "CLOSED",
-
-            expectedCash,
-
-            countedCash,
-
-            cashDifference,
-
-            closedAt:
-              new Date(),
-
-            notes:
-              dto.notes ??
-              shift.notes,
-          },
-
           include: {
             branch: true,
 
@@ -693,6 +702,12 @@ export class ShiftsService {
             },
           },
           });
+
+        if (!closedShift) {
+          throw new NotFoundException(
+            "Closed shift not found",
+          );
+        }
 
         await this.auditService.createWithTx(
           tx,

@@ -15,6 +15,9 @@ import {
 import {
   AuthenticatedUser,
 } from "../auth/jwt-auth.guard";
+import {
+  resolveBranchScope,
+} from "../common/authorization/branch-access";
 
 @Injectable()
 export class ReportsService {
@@ -74,7 +77,11 @@ export class ReportsService {
     user: AuthenticatedUser,
     branchId?: string,
   ) {
-    return branchId ?? user.branchId ?? undefined;
+    return resolveBranchScope(
+      this.prisma,
+      user,
+      branchId,
+    );
   }
 
   async getSalesByPeriod(
@@ -85,7 +92,7 @@ export class ReportsService {
   ) {
     const { start, end } =
       this.resolveDateRange(startDate, endDate);
-    const scopedBranch = this.branchFilter(user, branchId);
+    const scopedBranch = await this.branchFilter(user, branchId);
     const sales = await this.prisma.sale.findMany({
       where: {
         tenantId: user.tenantId,
@@ -129,10 +136,11 @@ export class ReportsService {
   ) {
     const start = new Date(year, 0, 1);
     const end = new Date(year, 11, 31, 23, 59, 59, 999);
+    const scopedBranch = await this.branchFilter(user, branchId);
     const sales = await this.prisma.sale.findMany({
       where: {
         tenantId: user.tenantId,
-        branchId: this.branchFilter(user, branchId),
+        branchId: scopedBranch,
         status: "COMPLETED",
         createdAt: { gte: start, lte: end },
       },
@@ -156,9 +164,11 @@ export class ReportsService {
     endDate?: string,
   ) {
     const { start, end } = this.resolveDateRange(startDate, endDate);
+    const scopedBranch = await this.branchFilter(user);
     const sales = await this.prisma.sale.findMany({
       where: {
         tenantId: user.tenantId,
+        branchId: scopedBranch,
         status: "COMPLETED",
         createdAt: { gte: start, lte: end },
       },
@@ -191,11 +201,12 @@ export class ReportsService {
     branchId?: string,
   ) {
     const { start, end } = this.resolveDateRange(startDate, endDate);
+    const scopedBranch = await this.branchFilter(user, branchId);
     const items = await this.prisma.saleItem.findMany({
       where: {
         sale: {
           tenantId: user.tenantId,
-          branchId: this.branchFilter(user, branchId),
+          branchId: scopedBranch,
           status: "COMPLETED",
           createdAt: { gte: start, lte: end },
         },
@@ -237,10 +248,11 @@ export class ReportsService {
   }
 
   async getStockValuation(user: AuthenticatedUser) {
+    const scopedBranch = await this.branchFilter(user);
     const inventory = await this.prisma.inventory.findMany({
       where: {
         branch: { tenantId: user.tenantId },
-        branchId: this.branchFilter(user),
+        branchId: scopedBranch,
       },
       include: { product: true, branch: true },
     });
@@ -276,15 +288,16 @@ export class ReportsService {
   async getPaymentReconciliation(
     user: AuthenticatedUser,
   ) {
+    const scopedBranch = await this.branchFilter(user);
     const payments =
       await this.prisma.paymentTransaction.findMany({
         where: {
           tenantId:
             user.tenantId,
-          ...(user.branchId
+          ...(scopedBranch
             ? {
                 branchId:
-                  user.branchId,
+                  scopedBranch,
               }
             : {}),
         },

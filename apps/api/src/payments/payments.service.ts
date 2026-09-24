@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -16,6 +17,9 @@ import {
 } from "../pos-checkouts/pos-checkouts.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import {
+  getBranchScope,
+} from "../common/authorization/branch-access";
 import {
   CardService,
 } from "./card/card.service";
@@ -58,6 +62,7 @@ export class PaymentsService {
     reference: string | undefined,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const order =
       await this.prisma.order.findFirst({
         where: {
@@ -66,6 +71,7 @@ export class PaymentsService {
 
           tenantId:
             user.tenantId,
+          branchId,
 
           status:
             "AWAITING_PAYMENT",
@@ -123,13 +129,14 @@ export class PaymentsService {
   ) {
     return this.prisma.$transaction(
       async (tx) => {
+        const branchId = getBranchScope(manager);
         const payment =
           await tx.paymentTransaction.findFirst({
             where: {
               id: paymentId,
               tenantId: manager.tenantId,
+              branchId,
               provider: "BANK",
-              status: "PENDING",
             },
             include: {
               order: {
@@ -142,7 +149,13 @@ export class PaymentsService {
 
         if (!payment) {
           throw new NotFoundException(
-            "Pending bank payment not found",
+            "Bank payment not found",
+          );
+        }
+
+        if (payment.status !== "PENDING") {
+          throw new ConflictException(
+            "Payment was already reviewed",
           );
         }
 
@@ -223,12 +236,6 @@ export class PaymentsService {
           return reviewRequired;
         }
 
-        await this.ordersService.confirmPaidOrderWithTx(
-          tx,
-          payment.order.id,
-          manager.sub,
-        );
-
         const approved =
           await this.transitionPendingBankPayment(
             tx,
@@ -240,6 +247,13 @@ export class PaymentsService {
               completedAt: new Date(),
             },
           );
+
+        await this.ordersService.confirmPaidOrderWithTx(
+          tx,
+          payment.order.id,
+          payment.tenantId,
+          manager.sub,
+        );
 
         await this.auditService.createWithTx(
           tx,
@@ -279,7 +293,7 @@ export class PaymentsService {
       });
 
     if (transitioned.count !== 1) {
-      throw new BadRequestException(
+      throw new ConflictException(
         "Payment was already reviewed",
       );
     }
@@ -310,6 +324,7 @@ export class PaymentsService {
       );
     }
 
+    const branchId = getBranchScope(user);
     const order =
       await this.prisma.order.findFirst({
         where: {
@@ -318,6 +333,7 @@ export class PaymentsService {
 
           tenantId:
             user.tenantId,
+          branchId,
 
           status:
             "AWAITING_PAYMENT",
@@ -500,10 +516,12 @@ export class PaymentsService {
     phoneInput: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const order = await this.prisma.order.findFirst({
       where: {
         id: orderId,
         tenantId: user.tenantId,
+        branchId,
         status: "AWAITING_PAYMENT",
         paymentStatus: {
           in: ["UNPAID", "PENDING"],
@@ -623,12 +641,13 @@ export class PaymentsService {
     phoneInput: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const checkout =
       await this.prisma.posCheckout.findFirst({
         where: {
           id: posCheckoutId,
           tenantId: user.tenantId,
-          branchId: user.branchId ?? undefined,
+          branchId,
           status: {
             in: [
               "AWAITING_PAYMENT",
@@ -766,12 +785,14 @@ export class PaymentsService {
     transactionNumber: string,
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const payment =
       await this.prisma.paymentTransaction.findFirst({
         where: {
           transactionNumber,
           tenantId:
             user.tenantId,
+          branchId,
         },
         select: {
           transactionNumber: true,
@@ -798,12 +819,13 @@ export class PaymentsService {
   async findAll(
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     return this.prisma.paymentTransaction.findMany({
       where: {
         tenantId: user.tenantId,
-        ...(user.branchId
+        ...(branchId
           ? {
-              branchId: user.branchId,
+              branchId,
             }
           : {}),
       },
@@ -829,11 +851,13 @@ export class PaymentsService {
   async getPaymentReviewQueue(
     user: AuthenticatedUser,
   ) {
+    const branchId = getBranchScope(user);
     const payments =
       await this.prisma.paymentTransaction.findMany({
         where: {
           tenantId:
             user.tenantId,
+          branchId,
           status:
             "REQUIRES_REVIEW",
         },
@@ -1059,6 +1083,7 @@ export class PaymentsService {
           .confirmPaidOrderWithTx(
             tx,
             payment.order.id,
+            payment.tenantId,
           );
 
         await tx.paymentTransaction.update({
@@ -1209,6 +1234,7 @@ export class PaymentsService {
                 tx,
                 payment.posCheckout.id,
                 payment.id,
+                payment.tenantId,
               );
 
           const completed =
@@ -1390,6 +1416,7 @@ export class PaymentsService {
           .confirmPaidOrderWithTx(
             tx,
             payment.order.id,
+            payment.tenantId,
           );
 
         /*

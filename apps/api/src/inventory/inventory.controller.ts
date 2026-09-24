@@ -43,11 +43,14 @@ export class InventoryController {
     productId: string,
     @Query("branchId")
     branchId: string,
+    @CurrentUser()
+    user: AuthenticatedUser,
   ) {
     return this.inventoryService
       .getProductAvailability(
         productId,
         branchId,
+        user,
       );
   }
 
