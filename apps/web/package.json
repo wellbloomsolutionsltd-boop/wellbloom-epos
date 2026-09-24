@@ -2,6 +2,7 @@
   "name": "@wellbloom/web",
   "private": true,
   "scripts": {
+    "build": "next build",
     "dev": "next dev"
   },
   "devDependencies": {
