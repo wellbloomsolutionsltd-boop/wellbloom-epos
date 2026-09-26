@@ -4,8 +4,14 @@ import {
   Get,
   Inject,
   Post,
+  Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import type {
+  Request,
+  Response,
+} from "express";
 import { AuthService } from "./auth.service";
 import { CurrentUser } from "./current-user.decorator";
 import {
@@ -14,11 +20,13 @@ import {
 } from "./jwt-auth.guard";
 import { LoginDto } from "./dto/login.dto";
 import {
-  RefreshTokenDto,
-} from "./dto/refresh-token.dto";
-import {
   Throttle,
 } from "@nestjs/throttler";
+import {
+  clearRefreshCookie,
+  requireRefreshCookie,
+  setRefreshCookie,
+} from "./refresh-cookie";
 
 @Controller("auth")
 export class AuthController {
@@ -34,10 +42,23 @@ export class AuthController {
     },
   })
   @Post("login")
-  login(
+  async login(
     @Body() dto: LoginDto,
+    @Res({ passthrough: true })
+    response: Response,
   ) {
-    return this.authService.login(dto);
+    const result =
+      await this.authService.login(dto);
+
+    setRefreshCookie(
+      response,
+      result.refreshToken,
+    );
+
+    return {
+      accessToken: result.accessToken,
+      user: result.user,
+    };
   }
 
   @Post("refresh")
@@ -47,32 +68,57 @@ export class AuthController {
       ttl: 60_000,
     },
   })
-  refresh(
-    @Body() dto: RefreshTokenDto,
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true })
+    response: Response,
   ) {
-    return this.authService.refresh(
-      dto.refreshToken,
+    const result =
+      await this.authService.refresh(
+        requireRefreshCookie(request),
+      );
+
+    setRefreshCookie(
+      response,
+      result.refreshToken,
     );
+
+    return {
+      accessToken: result.accessToken,
+      user: result.user,
+    };
   }
 
   @Post("logout")
-  logout(
-    @Body() dto: RefreshTokenDto,
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true })
+    response: Response,
   ) {
-    return this.authService.logout(
-      dto.refreshToken,
-    );
+    try {
+      return await this.authService.logout(
+        requireRefreshCookie(request),
+      );
+    } finally {
+      clearRefreshCookie(response);
+    }
   }
 
   @UseGuards(JwtAuthGuard)
   @Post("logout-all")
-  logoutAll(
+  async logoutAll(
     @CurrentUser()
     user: AuthenticatedUser,
+    @Res({ passthrough: true })
+    response: Response,
   ) {
-    return this.authService.logoutAll(
-      user.sub,
-    );
+    try {
+      return await this.authService.logoutAll(
+        user.sub,
+      );
+    } finally {
+      clearRefreshCookie(response);
+    }
   }
 
   @UseGuards(JwtAuthGuard)

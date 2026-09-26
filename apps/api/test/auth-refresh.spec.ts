@@ -368,6 +368,15 @@ test("valid refresh revokes the old session and creates a new one", async () => 
   );
   assert.equal(state.sessions[1].revokedAt, null);
   assert.notEqual(result.refreshToken, originalToken);
+  assert.equal(result.user.id, state.user.id);
+  assert.equal(
+    result.user.tenant.id,
+    state.user.tenantId,
+  );
+  assert.equal(
+    result.user.branch?.id,
+    state.user.branchId,
+  );
 });
 
 test("reused rotated refresh token is rejected", async () => {

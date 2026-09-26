@@ -199,6 +199,10 @@ export class AuthService {
             where: {
               id: payload.sub,
             },
+            include: {
+              branch: true,
+              tenant: true,
+            },
           });
 
         if (
@@ -253,6 +257,25 @@ export class AuthService {
         return {
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
+          user: {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            role: user.role,
+            tenant: {
+              id: user.tenant.id,
+              name: user.tenant.name,
+              code: user.tenant.code,
+            },
+            branch: user.branch
+              ? {
+                  id: user.branch.id,
+                  name: user.branch.name,
+                  code: user.branch.code,
+                }
+              : null,
+          },
         };
       },
     );

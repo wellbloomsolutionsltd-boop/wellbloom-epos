@@ -28,6 +28,10 @@ test("valid local environment resolves safe defaults", () => {
       "http://127.0.0.1:3000",
     ],
   );
+  assert.equal(
+    result.authCookieSecure,
+    false,
+  );
 });
 
 test("missing database URL blocks startup", () => {
@@ -86,5 +90,13 @@ test("invalid JWT expiry and CORS values block startup", () => {
       CORS_ORIGIN: "*",
     }),
     /Wildcard CORS origins/,
+  );
+
+  assert.throws(
+    () => validateEnvironment({
+      ...validEnvironment,
+      AUTH_COOKIE_SECURE: "sometimes",
+    }),
+    /AUTH_COOKIE_SECURE must be true or false/,
   );
 });

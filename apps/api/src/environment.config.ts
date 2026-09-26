@@ -4,6 +4,9 @@ import type {
 import {
   resolveCorsOrigins,
 } from "./cors.config";
+import {
+  resolveRefreshCookieSecure,
+} from "./auth/refresh-cookie";
 
 type JwtExpiry = NonNullable<
   NonNullable<JwtModuleOptions["signOptions"]>["expiresIn"]
@@ -16,6 +19,7 @@ export type ValidatedEnvironment = {
   jwtExpiresIn: JwtExpiry;
   jwtRefreshExpiresIn: JwtExpiry;
   corsOrigins: string[];
+  authCookieSecure: boolean;
 };
 
 const JWT_EXPIRY_PATTERN =
@@ -113,5 +117,9 @@ export function validateEnvironment(
     jwtExpiresIn,
     jwtRefreshExpiresIn,
     corsOrigins: resolveCorsOrigins(environment),
+    authCookieSecure:
+      resolveRefreshCookieSecure(
+        environment,
+      ),
   };
 }
