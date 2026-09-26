@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AuthProvider } from "../components/auth/AuthProvider";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "WELLBLOOM EPOS",
-  description: "WELLBLOOM point of sale",
+  title: {
+    default: "Wellbloom POS",
+    template: "%s · Wellbloom",
+  },
+  description:
+    "Wellbloom retail operations and point of sale",
 };
 
 export default function RootLayout({
@@ -11,7 +17,11 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="app-body">
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }
