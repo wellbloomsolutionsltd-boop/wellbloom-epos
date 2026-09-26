@@ -150,11 +150,12 @@ model ProductPrice {
 }
 
 model User {
-  id           String @id @default(cuid())
+  id           String  @id @default(cuid())
   firstName    String
   lastName     String
   email        String
   passwordHash String
+  quickPinHash String?
 
   role     UserRole @default(CASHIER)
   isActive Boolean  @default(true)

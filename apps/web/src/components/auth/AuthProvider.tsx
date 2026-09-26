@@ -46,6 +46,7 @@ export type AuthUser = {
     name: string;
     code: string;
   } | null;
+  pinConfigured: boolean;
 };
 
 type AuthContextValue = {
@@ -58,6 +59,7 @@ type AuthContextValue = {
   ) => Promise<void>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
+  markPinConfigured: () => void;
 };
 
 const AuthContext =
@@ -169,6 +171,17 @@ export function AuthProvider({
     }
   }
 
+  function markPinConfigured() {
+    setUser((currentUser) =>
+      currentUser
+        ? {
+            ...currentUser,
+            pinConfigured: true,
+          }
+        : currentUser,
+    );
+  }
+
   useEffect(() => {
     return onSessionInvalidated(() => {
       clearSession();
@@ -189,6 +202,7 @@ export function AuthProvider({
         login,
         logout,
         restoreSession,
+        markPinConfigured,
       }}
     >
       {children}

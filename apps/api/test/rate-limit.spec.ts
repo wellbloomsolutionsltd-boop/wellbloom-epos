@@ -101,6 +101,28 @@ test("refresh is limited to twelve requests per minute", () => {
   );
 });
 
+test("quick PIN verification and setup are limited to five attempts per minute", () => {
+  for (const handler of [
+    AuthController.prototype.verifyPin,
+    AuthController.prototype.setPin,
+  ]) {
+    assert.equal(
+      Reflect.getMetadata(
+        "THROTTLER:LIMITdefault",
+        handler,
+      ),
+      5,
+    );
+    assert.equal(
+      Reflect.getMetadata(
+        "THROTTLER:TTLdefault",
+        handler,
+      ),
+      60_000,
+    );
+  }
+});
+
 test("M-Pesa callbacks are exempt from interactive-user throttling", () => {
   assert.equal(
     Reflect.getMetadata(

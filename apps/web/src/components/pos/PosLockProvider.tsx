@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
+import { PosLockScreen } from "./PosLockScreen";
 
 export type PosLockReason = "MANUAL" | "INACTIVITY";
 
@@ -48,6 +49,7 @@ export function PosLockProvider({
     reason: null,
   });
   const lastActivityAt = useRef(Date.now());
+  const protectedContentRef = useRef<HTMLDivElement>(null);
 
   const lock = useCallback((reason: PosLockReason) => {
     setLockState({
@@ -131,6 +133,27 @@ export function PosLockProvider({
     };
   }, [inactivityTimeoutMs, lock, lockState.locked]);
 
+  useEffect(() => {
+    const protectedContent = protectedContentRef.current;
+
+    if (!protectedContent) {
+      return;
+    }
+
+    if (lockState.locked) {
+      protectedContent.setAttribute("inert", "");
+      document.body.style.overflow = "hidden";
+    } else {
+      protectedContent.removeAttribute("inert");
+      document.body.style.overflow = "";
+    }
+
+    return () => {
+      protectedContent.removeAttribute("inert");
+      document.body.style.overflow = "";
+    };
+  }, [lockState.locked]);
+
   const value = useMemo(
     () => ({
       ...lockState,
@@ -142,7 +165,32 @@ export function PosLockProvider({
 
   return (
     <PosLockContext.Provider value={value}>
-      {children}
+      <div
+        ref={protectedContentRef}
+        aria-hidden={lockState.locked || undefined}
+        className={lockState.locked ? "pos-content pos-content--locked" : "pos-content"}
+      >
+        {children}
+      </div>
+
+      {!lockState.locked && (
+        <button
+          type="button"
+          className="pos-quick-lock"
+          onClick={() => lock("MANUAL")}
+          aria-label="Quick lock POS"
+        >
+          <span aria-hidden="true">▣</span>
+          Quick lock
+        </button>
+      )}
+
+      {lockState.locked && lockState.reason && (
+        <PosLockScreen
+          reason={lockState.reason}
+          onUnlock={unlockAfterPinVerification}
+        />
+      )}
     </PosLockContext.Provider>
   );
 }

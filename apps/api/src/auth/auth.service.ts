@@ -27,6 +27,9 @@ type WellbloomTokenPayload = AuthenticatedUser & {
   jti: string;
 };
 
+const DUMMY_PIN_HASH =
+  "$2b$12$S4NtMBb4WHH1wE8vFo/nC.PAeNAHWw/DjxY7RCOEwdAfANOOmEoGe";
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -146,6 +149,9 @@ export class AuthService {
         email: user.email,
 
         role: user.role,
+        pinConfigured: Boolean(
+          user.quickPinHash,
+        ),
 
         tenant: {
           id: user.tenant.id,
@@ -263,6 +269,9 @@ export class AuthService {
             lastName: user.lastName,
             email: user.email,
             role: user.role,
+            pinConfigured: Boolean(
+              user.quickPinHash,
+            ),
             tenant: {
               id: user.tenant.id,
               name: user.tenant.name,
@@ -301,6 +310,97 @@ export class AuthService {
         revokedAt: new Date(),
       },
     });
+
+    return {
+      success: true,
+    };
+  }
+
+  async verifyPin(
+    authenticatedUser: AuthenticatedUser,
+    pin: string,
+  ) {
+    const user =
+      await this.prisma.user.findFirst({
+        where: {
+          id: authenticatedUser.sub,
+          tenantId:
+            authenticatedUser.tenantId,
+          isActive: true,
+        },
+        select: {
+          quickPinHash: true,
+        },
+      });
+
+    const valid = await bcrypt.compare(
+      pin,
+      user?.quickPinHash ??
+        DUMMY_PIN_HASH,
+    );
+
+    if (!user?.quickPinHash || !valid) {
+      throw new UnauthorizedException(
+        "Invalid PIN",
+      );
+    }
+
+    return {
+      success: true,
+    };
+  }
+
+  async setPin(
+    authenticatedUser: AuthenticatedUser,
+    currentPassword: string,
+    pin: string,
+  ) {
+    const user =
+      await this.prisma.user.findFirst({
+        where: {
+          id: authenticatedUser.sub,
+          tenantId:
+            authenticatedUser.tenantId,
+          isActive: true,
+        },
+        select: {
+          passwordHash: true,
+        },
+      });
+
+    const passwordValid = user
+      ? await bcrypt.compare(
+          currentPassword,
+          user.passwordHash,
+        )
+      : false;
+
+    if (!user || !passwordValid) {
+      throw new UnauthorizedException(
+        "Unable to configure quick PIN",
+      );
+    }
+
+    const quickPinHash =
+      await bcrypt.hash(pin, 12);
+    const updated =
+      await this.prisma.user.updateMany({
+        where: {
+          id: authenticatedUser.sub,
+          tenantId:
+            authenticatedUser.tenantId,
+          isActive: true,
+        },
+        data: {
+          quickPinHash,
+        },
+      });
+
+    if (updated.count !== 1) {
+      throw new UnauthorizedException(
+        "Unable to configure quick PIN",
+      );
+    }
 
     return {
       success: true,

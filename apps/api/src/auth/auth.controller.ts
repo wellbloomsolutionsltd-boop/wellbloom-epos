@@ -19,6 +19,8 @@ import {
   JwtAuthGuard,
 } from "./jwt-auth.guard";
 import { LoginDto } from "./dto/login.dto";
+import { SetPinDto } from "./dto/set-pin.dto";
+import { VerifyPinDto } from "./dto/verify-pin.dto";
 import {
   Throttle,
 } from "@nestjs/throttler";
@@ -102,6 +104,45 @@ export class AuthController {
     } finally {
       clearRefreshCookie(response);
     }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Throttle({
+    default: {
+      limit: 5,
+      ttl: 60_000,
+    },
+  })
+  @Post("verify-pin")
+  verifyPin(
+    @CurrentUser()
+    user: AuthenticatedUser,
+    @Body() dto: VerifyPinDto,
+  ) {
+    return this.authService.verifyPin(
+      user,
+      dto.pin,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Throttle({
+    default: {
+      limit: 5,
+      ttl: 60_000,
+    },
+  })
+  @Post("pin")
+  setPin(
+    @CurrentUser()
+    user: AuthenticatedUser,
+    @Body() dto: SetPinDto,
+  ) {
+    return this.authService.setPin(
+      user,
+      dto.currentPassword,
+      dto.pin,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

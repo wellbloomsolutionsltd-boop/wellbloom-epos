@@ -12,6 +12,7 @@ import {
 } from "@nestjs/core";
 import {
   JwtModule,
+  JwtService,
 } from "@nestjs/jwt";
 import {
   configureApiRuntime,
@@ -46,6 +47,7 @@ const user = {
     name: "Main Branch",
     code: "MAIN",
   },
+  pinConfigured: true,
 };
 
 function createAuthService() {
@@ -55,6 +57,7 @@ function createAuthService() {
   const calls = {
     refresh: [] as string[],
     logout: [] as string[],
+    verifyPin: [] as string[],
   };
 
   return {
@@ -110,6 +113,19 @@ function createAuthService() {
       logoutAll: async () => ({
         success: true,
       }),
+      verifyPin: async (
+        _authenticatedUser: unknown,
+        pin: string,
+      ) => {
+        calls.verifyPin.push(pin);
+
+        if (pin !== "2468") {
+          throw new UnauthorizedException("Invalid PIN");
+        }
+
+        return { success: true };
+      },
+      setPin: async () => ({ success: true }),
     },
   };
 }
@@ -409,4 +425,55 @@ test("refresh cookie Secure mode is explicitly environment-controlled", () => {
     }),
     /AUTH_COOKIE_SECURE must be true or false/,
   );
+});
+
+test("quick PIN verification is authenticated and accepts only the entered PIN", async () => {
+  await withAuthApp(async (baseUrl, auth) => {
+    const accessToken = await new JwtService().signAsync(
+      {
+        sub: user.id,
+        tenantId: user.tenant.id,
+        branchId: user.branch.id,
+        role: user.role,
+        email: user.email,
+        tokenUse: "access",
+        jti: "access-token-id",
+      },
+      {
+        secret: "cookie-test-access-secret",
+      },
+    );
+
+    const unauthenticated = await fetch(
+      `${baseUrl}/auth/verify-pin`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: "2468" }),
+      },
+    );
+    assert.equal(unauthenticated.status, 401);
+
+    const wrong = await fetch(`${baseUrl}/auth/verify-pin`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ pin: "1111" }),
+    });
+    assert.equal(wrong.status, 401);
+
+    const verified = await fetch(`${baseUrl}/auth/verify-pin`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ pin: "2468" }),
+    });
+    assert.equal(verified.status, 201);
+    assert.deepEqual(await verified.json(), { success: true });
+    assert.deepEqual(auth.calls.verifyPin, ["1111", "2468"]);
+  });
 });

@@ -265,6 +265,31 @@ button { color: inherit; }
 .shell-loading p { color: var(--ink-500); font-size: .78rem; }
 @keyframes breathe { 50% { transform: scale(.94); opacity: .74; } }
 
+/* POS quick lock */
+.pos-content { min-height: 100vh; }
+.pos-content--locked { pointer-events: none; user-select: none; }
+.pos-quick-lock { align-items: center; background: var(--wb-navy); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; bottom: 22px; box-shadow: 0 14px 34px rgba(11,31,51,.24); color: white; cursor: pointer; display: inline-flex; font-size: .78rem; font-weight: 800; gap: 9px; min-height: 44px; padding: 0 17px; position: fixed; right: 22px; z-index: 60; }
+.pos-quick-lock:hover { background: var(--wb-navy-2); transform: translateY(-1px); }
+.pos-quick-lock span { color: var(--wb-gold-soft); font-size: .95rem; }
+.pos-lock { align-items: center; background: radial-gradient(circle at 18% 12%, rgba(31,122,77,.28), transparent 34%), linear-gradient(140deg, #07131f, var(--wb-navy) 55%, #102d33); display: flex; inset: 0; justify-content: center; overflow-y: auto; padding: 28px; position: fixed; z-index: 1000; }
+.pos-lock__atmosphere { background-image: radial-gradient(rgba(255,255,255,.16) 1px, transparent 1px); background-size: 28px 28px; inset: 0; mask-image: linear-gradient(135deg, black, transparent 70%); opacity: .18; pointer-events: none; position: absolute; }
+.pos-lock__card { background: rgba(255,255,255,.98); border: 1px solid rgba(255,255,255,.5); border-radius: 28px; box-shadow: 0 34px 90px rgba(0,0,0,.34); max-width: 440px; padding: 34px; position: relative; text-align: center; width: 100%; }
+.pos-lock__logo { background: var(--wb-navy); border-radius: 14px; display: block; height: auto; margin: -66px auto 26px; object-fit: contain; padding: 10px 16px; width: 190px; }
+.pos-lock__icon { align-items: center; background: var(--sage-100); border: 1px solid var(--sage-200); border-radius: 50%; display: flex; height: 58px; justify-content: center; margin: 0 auto 18px; width: 58px; }
+.pos-lock__icon::before { border: 3px solid var(--wb-green-dark); border-radius: 7px; content: ""; height: 21px; margin-top: 8px; width: 25px; }
+.pos-lock__icon span { border: 3px solid var(--wb-green-dark); border-bottom: 0; border-radius: 14px 14px 0 0; height: 17px; position: absolute; transform: translateY(-12px); width: 18px; }
+.pos-lock__eyebrow { color: var(--wb-green-dark); font-size: .68rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+.pos-lock h1 { color: var(--wb-navy); font-family: Georgia, "Times New Roman", serif; font-size: 1.95rem; font-weight: 500; letter-spacing: -.035em; margin: 8px 0 10px; }
+.pos-lock__identity { display: flex; flex-direction: column; margin: 0 0 24px; }
+.pos-lock__identity strong { font-size: .82rem; }
+.pos-lock__identity span { color: var(--wb-text-muted); font-size: .72rem; margin-top: 3px; }
+.pos-lock__form { display: grid; gap: 15px; text-align: left; }
+.pos-lock__form .ui-button { margin-top: 3px; width: 100%; }
+.pos-lock__setup-note { background: var(--sage-50); border: 1px solid var(--sage-200); border-radius: 12px; color: var(--ink-700); font-size: .74rem; line-height: 1.55; margin: 0; padding: 11px 13px; }
+.pos-lock__logout { background: transparent; border: 0; color: var(--wb-text-muted); cursor: pointer; font-size: .75rem; font-weight: 750; margin-top: 18px; padding: 7px; text-decoration: underline; text-underline-offset: 3px; }
+.pos-lock__logout:disabled { cursor: not-allowed; opacity: .55; }
+.pos-lock__shift-note { border-top: 1px solid var(--wb-border); color: var(--ink-400); font-size: .66rem; margin: 17px 0 0; padding-top: 16px; }
+
 /* Dashboard */
 .dashboard-page { margin: 0 auto; max-width: 1480px; }
 .dashboard-welcome { align-items: flex-end; display: flex; justify-content: space-between; margin-bottom: 28px; }
@@ -335,6 +360,10 @@ button { color: inherit; }
   .metric-card { min-height: 132px; }
   .quick-actions { grid-template-columns: 1fr; }
   .quick-actions a { min-height: 110px; }
+  .pos-lock { padding: 56px 16px 24px; }
+  .pos-lock__card { border-radius: 22px; padding: 27px 20px; }
+  .pos-lock__logo { margin-top: -55px; }
+  .pos-quick-lock { bottom: 14px; right: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -6,6 +6,7 @@ export type AuthUser = {
   lastName: string;
   email: string;
   role: string;
+  pinConfigured: boolean;
 
   tenant: {
     id: string;

@@ -85,6 +85,7 @@ function hashToken(token: string) {
 function createHarness(options: {
   isActive?: boolean;
   passwordHash?: string;
+  quickPinHash?: string | null;
 } = {}) {
   const user = {
     id: "user-1",
@@ -93,6 +94,8 @@ function createHarness(options: {
     email: "manager@example.test",
     passwordHash:
       options.passwordHash ?? "unused",
+    quickPinHash:
+      options.quickPinHash ?? null,
     role: "MANAGER",
     isActive: options.isActive ?? true,
     tenantId: tenant.id,
@@ -193,6 +196,29 @@ function createHarness(options: {
         }
 
         return user;
+      },
+      findFirst: async ({ where }: any) => {
+        if (
+          where.id !== user.id ||
+          where.tenantId !== user.tenantId ||
+          where.isActive !== user.isActive
+        ) {
+          return null;
+        }
+
+        return user;
+      },
+      updateMany: async ({ where, data }: any) => {
+        if (
+          where.id !== user.id ||
+          where.tenantId !== user.tenantId ||
+          where.isActive !== user.isActive
+        ) {
+          return { count: 0 };
+        }
+
+        Object.assign(user, data);
+        return { count: 1 };
       },
     },
     refreshTokenSession,
@@ -320,6 +346,61 @@ test("login returns tokens and creates an active hashed refresh session", async 
   assert.equal(accessPayload.tenantId, tenant.id);
   assert.equal(accessPayload.branchId, branch.id);
   assert.equal(accessPayload.role, "MANAGER");
+  assert.equal(result.user.pinConfigured, false);
+});
+
+test("correct quick PIN unlocks while a wrong PIN remains rejected", async () => {
+  const quickPinHash = await bcrypt.hash("2468", 4);
+  const { service } = createHarness({ quickPinHash });
+  const authenticatedUser = refreshPayload("unused");
+
+  assert.deepEqual(
+    await service.verifyPin(authenticatedUser, "2468"),
+    { success: true },
+  );
+  await assert.rejects(
+    () => service.verifyPin(authenticatedUser, "1111"),
+    (error: unknown) =>
+      error instanceof UnauthorizedException &&
+      error.message === "Invalid PIN",
+  );
+});
+
+test("missing quick PIN uses the same generic rejection", async () => {
+  const { service } = createHarness();
+
+  await assert.rejects(
+    () => service.verifyPin(refreshPayload("unused"), "2468"),
+    (error: unknown) =>
+      error instanceof UnauthorizedException &&
+      error.message === "Invalid PIN",
+  );
+});
+
+test("quick PIN setup verifies the account password and stores only a hash", async () => {
+  const passwordHash = await bcrypt.hash("correct-password", 4);
+  const { service, state } = createHarness({ passwordHash });
+  const authenticatedUser = refreshPayload("unused");
+
+  await assert.rejects(
+    () => service.setPin(authenticatedUser, "wrong-password", "2468"),
+    UnauthorizedException,
+  );
+  assert.equal(state.user.quickPinHash, null);
+
+  assert.deepEqual(
+    await service.setPin(
+      authenticatedUser,
+      "correct-password",
+      "2468",
+    ),
+    { success: true },
+  );
+  assert.notEqual(state.user.quickPinHash, "2468");
+  assert.equal(
+    await bcrypt.compare("2468", state.user.quickPinHash ?? ""),
+    true,
+  );
 });
 
 test("failed login records a safe audit event", async () => {
