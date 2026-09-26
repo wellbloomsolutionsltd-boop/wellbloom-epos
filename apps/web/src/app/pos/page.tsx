@@ -120,6 +120,22 @@ export default function PosPage() {
     useState<Customer | null>(null);
   const [customerSearching, setCustomerSearching] = useState(false);
 
+  function startNewSale() {
+    setCompletedSale(null);
+    setCart([]);
+    setSelectedCustomer(null);
+    setCustomerSearch("");
+    setCustomerResults([]);
+    setBarcode("");
+    setShowPayment(false);
+    setPaymentMethod("CASH");
+    setAmountTendered("");
+    setMpesaPhone("");
+    setPendingCheckoutId(null);
+    setMpesaWaiting(false);
+    setMessage("");
+  }
+
   useEffect(() => {
     const storedSession = getSession();
 
@@ -285,9 +301,6 @@ export default function PosPage() {
         payments: data.sale.payments,
       });
 
-      setCart([]);
-      setSelectedCustomer(null);
-      setAmountTendered("");
       setShowPayment(false);
     } catch (error) {
       setMessage(
@@ -443,10 +456,6 @@ export default function PosPage() {
           payments: sale.payments,
         });
 
-        setCart([]);
-        setSelectedCustomer(null);
-        setAmountTendered("");
-        setMpesaPhone("");
         setPendingCheckoutId(null);
         setMpesaWaiting(false);
         setShowPayment(false);
@@ -1177,7 +1186,7 @@ export default function PosPage() {
 
               <button
                 type="button"
-                onClick={() => setCompletedSale(null)}
+                onClick={startNewSale}
                 className="rounded-xl bg-black px-4 py-3 font-bold text-white"
               >
                 New Sale

@@ -16,6 +16,7 @@ import {
   clearSession,
   getSession,
 } from "../../../lib/auth";
+import { useAuth } from "../../../components/auth/AuthProvider";
 
 type Shift = {
   id: string;
@@ -99,6 +100,7 @@ function money(
 export default function ShiftPage() {
   const router =
     useRouter();
+  const { logout } = useAuth();
 
   const [shift, setShift] =
     useState<Shift | null>(
@@ -141,6 +143,12 @@ export default function ShiftPage() {
 
   const [message, setMessage] =
     useState("");
+
+  const [closedShiftResult, setClosedShiftResult] = useState<{
+    expectedCash: string;
+    countedCash: string;
+    cashDifference: string;
+  } | null>(null);
 
   const session =
     getSession();
@@ -357,6 +365,7 @@ export default function ShiftPage() {
       }
 
       setShift(data);
+      setClosedShiftResult(null);
       setOpeningCash("");
     } catch (error) {
       setMessage(
@@ -418,15 +427,11 @@ export default function ShiftPage() {
 
       setOpeningCash("");
 
-      setMessage(
-        `Expected: KES ${money(
-          data.expectedCash,
-        )}. Counted: KES ${money(
-          data.countedCash,
-        )}. Variance: KES ${money(
-          data.cashDifference,
-        )}`,
-      );
+      setClosedShiftResult({
+        expectedCash: String(data.expectedCash ?? 0),
+        countedCash: String(data.countedCash ?? 0),
+        cashDifference: String(data.cashDifference ?? 0),
+      });
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -436,6 +441,11 @@ export default function ShiftPage() {
     } finally {
       setWorking(false);
     }
+  }
+
+  async function handleLogout() {
+    await logout();
+    router.replace("/login");
   }
 
   if (loading) {
@@ -474,7 +484,52 @@ export default function ShiftPage() {
           </div>
         )}
 
-        {!shift ? (
+        {closedShiftResult ? (
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <div className="text-center">
+              <div className="text-5xl text-green-600" aria-hidden="true">
+                ✓
+              </div>
+              <h2 className="mt-3 text-2xl font-bold">
+                Shift closed successfully
+              </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Your account remains signed in. Choose what you want to do next.
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-3 rounded-xl bg-gray-50 p-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-gray-500">Expected</p>
+                <strong>KES {money(closedShiftResult.expectedCash)}</strong>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Counted</p>
+                <strong>KES {money(closedShiftResult.countedCash)}</strong>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Variance</p>
+                <strong>KES {money(closedShiftResult.cashDifference)}</strong>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <Link
+                href="/pos"
+                className="rounded-xl bg-green-600 px-4 py-3 text-center font-bold text-white"
+              >
+                Return to POS
+              </Link>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-xl border border-gray-300 px-4 py-3 font-bold"
+              >
+                Log out
+              </button>
+            </div>
+          </div>
+        ) : !shift ? (
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-bold">
               Open Shift
